@@ -10,3 +10,7 @@
 /extra/ssl/nginx*
 /traefik/certs/*
 /deploy/letsencrypt
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db

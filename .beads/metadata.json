@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "lago_fork",
+  "project_id": "23f7d7d1-7950-49fb-929b-237554d132bb"
+}
