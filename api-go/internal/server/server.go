@@ -12,12 +12,14 @@ import (
 	"github.com/getlago/lago/api-go/internal/graphql/generated"
 	"github.com/getlago/lago/api-go/internal/handlers"
 	authhandlers "github.com/getlago/lago/api-go/internal/handlers/auth"
+	bmhandlers "github.com/getlago/lago/api-go/internal/handlers/billable_metrics"
 	customerhandlers "github.com/getlago/lago/api-go/internal/handlers/customers"
 	eventhandlers "github.com/getlago/lago/api-go/internal/handlers/events"
 	invoicehandlers "github.com/getlago/lago/api-go/internal/handlers/invoices"
 	organizationhandlers "github.com/getlago/lago/api-go/internal/handlers/organizations"
 	kafkapkg "github.com/getlago/lago/api-go/internal/kafka"
 	"github.com/getlago/lago/api-go/internal/middleware"
+	bmservices "github.com/getlago/lago/api-go/internal/services/billable_metrics"
 	customerservices "github.com/getlago/lago/api-go/internal/services/customers"
 	eventservices "github.com/getlago/lago/api-go/internal/services/events"
 	invoiceservices "github.com/getlago/lago/api-go/internal/services/invoices"
@@ -46,8 +48,11 @@ func New(db *gorm.DB, sqlDB *sql.DB, version string, jwtSecret string, eventPubl
 	eventsSvc := eventservices.NewService(db, eventPublisher)
 	organizationSvc := organizationservices.NewService(db)
 	invoicesSvc := invoiceservices.NewService(db)
+	billableMetricsSvc := bmservices.NewService(db)
 	graphQLServer := handler.NewDefaultServer(generated.NewExecutableSchema(generated.Config{
-		Resolvers: &graphql.Resolver{},
+		Resolvers: &graphql.Resolver{
+			BillableMetricSvc: billableMetricsSvc,
+		},
 	}))
 
 	r.POST("/users/login", authhandlers.Login(authSvc))
@@ -78,6 +83,12 @@ func New(db *gorm.DB, sqlDB *sql.DB, version string, jwtSecret string, eventPubl
 		v1.GET("/invoices/:id", middleware.RequirePermission("invoice", "read"), invoicehandlers.Show(invoicesSvc))
 		v1.PUT("/invoices/:id/finalize", middleware.RequirePermission("invoice", "write"), invoicehandlers.Finalize(invoicesSvc))
 		v1.PUT("/invoices/:id/void", middleware.RequirePermission("invoice", "write"), invoicehandlers.Void(invoicesSvc))
+
+		v1.POST("/billable_metrics", middleware.RequirePermission("billable_metric", "write"), bmhandlers.Create(billableMetricsSvc))
+		v1.GET("/billable_metrics", middleware.RequirePermission("billable_metric", "read"), bmhandlers.Index(billableMetricsSvc))
+		v1.GET("/billable_metrics/:code", middleware.RequirePermission("billable_metric", "read"), bmhandlers.Show(billableMetricsSvc))
+		v1.PUT("/billable_metrics/:code", middleware.RequirePermission("billable_metric", "write"), bmhandlers.Update(billableMetricsSvc))
+		v1.DELETE("/billable_metrics/:code", middleware.RequirePermission("billable_metric", "write"), bmhandlers.Destroy(billableMetricsSvc))
 
 		// Phase 4+ routes registered here as each phase is implemented.
 	}

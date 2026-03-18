@@ -6,10 +6,14 @@ package graphql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/getlago/lago/api-go/internal/graphql/generated"
+	"github.com/getlago/lago/api-go/internal/graphql/graphcontext"
 	"github.com/getlago/lago/api-go/internal/graphql/model"
+	"github.com/getlago/lago/api-go/internal/models"
+	bmsvc "github.com/getlago/lago/api-go/internal/services/billable_metrics"
 )
 
 // AiConversationStreamed is the resolver for the aiConversationStreamed field.
@@ -104,7 +108,42 @@ func (r *mutationResolver) CreateAvalaraIntegration(ctx context.Context, input m
 
 // CreateBillableMetric is the resolver for the createBillableMetric field.
 func (r *mutationResolver) CreateBillableMetric(ctx context.Context, input model.CreateBillableMetricInput) (*model.BillableMetric, error) {
-	panic(fmt.Errorf("not implemented: CreateBillableMetric - createBillableMetric"))
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("unauthorized")
+	}
+
+	var filters []bmsvc.FilterInput
+	for _, f := range input.Filters {
+		if f == nil {
+			continue
+		}
+		filters = append(filters, bmsvc.FilterInput{Key: f.Key, Values: f.Values})
+	}
+
+	aggregationType := ""
+	if input.AggregationType != "" {
+		aggregationType = string(input.AggregationType)
+	}
+
+	metric, err := r.BillableMetricSvc.Create(ctx, orgID, bmsvc.CreateInput{
+		Name:              input.Name,
+		Code:              input.Code,
+		Description:       &input.Description,
+		AggregationType:   aggregationType,
+		FieldName:         input.FieldName,
+		Recurring:         input.Recurring,
+		Expression:        input.Expression,
+		WeightedInterval:  weightedIntervalPtr(input.WeightedInterval),
+		RoundingFunction:  roundingFunctionPtr(input.RoundingFunction),
+		RoundingPrecision: input.RoundingPrecision,
+		Filters:           filters,
+	})
+	if err != nil {
+		return nil, toBillableMetricGQLError(err)
+	}
+
+	return toGQLBillableMetric(metric), nil
 }
 
 // CreateBillingEntity is the resolver for the createBillingEntity field.
@@ -304,7 +343,22 @@ func (r *mutationResolver) DestroyAPIKey(ctx context.Context, input model.Destro
 
 // DestroyBillableMetric is the resolver for the destroyBillableMetric field.
 func (r *mutationResolver) DestroyBillableMetric(ctx context.Context, input model.DestroyBillableMetricInput) (*model.DestroyBillableMetricPayload, error) {
-	panic(fmt.Errorf("not implemented: DestroyBillableMetric - destroyBillableMetric"))
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("unauthorized")
+	}
+
+	metric, err := r.BillableMetricSvc.GetByID(ctx, orgID, input.ID)
+	if err != nil {
+		return nil, toBillableMetricGQLError(err)
+	}
+
+	deleted, err := r.BillableMetricSvc.Delete(ctx, orgID, metric.Code)
+	if err != nil {
+		return nil, toBillableMetricGQLError(err)
+	}
+
+	return &model.DestroyBillableMetricPayload{ID: &deleted.ID}, nil
 }
 
 // DestroyBillingEntity is the resolver for the destroyBillingEntity field.
@@ -689,7 +743,47 @@ func (r *mutationResolver) UpdateAvalaraIntegration(ctx context.Context, input m
 
 // UpdateBillableMetric is the resolver for the updateBillableMetric field.
 func (r *mutationResolver) UpdateBillableMetric(ctx context.Context, input model.UpdateBillableMetricInput) (*model.BillableMetric, error) {
-	panic(fmt.Errorf("not implemented: UpdateBillableMetric - updateBillableMetric"))
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("unauthorized")
+	}
+
+	existing, err := r.BillableMetricSvc.GetByID(ctx, orgID, input.ID)
+	if err != nil {
+		return nil, toBillableMetricGQLError(err)
+	}
+
+	var filters *[]bmsvc.FilterInput
+	if input.Filters != nil {
+		mapped := make([]bmsvc.FilterInput, 0, len(input.Filters))
+		for _, f := range input.Filters {
+			if f == nil {
+				continue
+			}
+			mapped = append(mapped, bmsvc.FilterInput{Key: f.Key, Values: f.Values})
+		}
+		filters = &mapped
+	}
+
+	aggregationType := string(input.AggregationType)
+
+	metric, err := r.BillableMetricSvc.Update(ctx, orgID, existing.Code, bmsvc.UpdateInput{
+		Name:              &input.Name,
+		Description:       &input.Description,
+		AggregationType:   &aggregationType,
+		FieldName:         input.FieldName,
+		Recurring:         input.Recurring,
+		Expression:        input.Expression,
+		WeightedInterval:  weightedIntervalPtr(input.WeightedInterval),
+		RoundingFunction:  roundingFunctionPtr(input.RoundingFunction),
+		RoundingPrecision: input.RoundingPrecision,
+		Filters:           filters,
+	})
+	if err != nil {
+		return nil, toBillableMetricGQLError(err)
+	}
+
+	return toGQLBillableMetric(metric), nil
 }
 
 // UpdateBillingEntity is the resolver for the updateBillingEntity field.
@@ -959,12 +1053,58 @@ func (r *queryResolver) APILogs(ctx context.Context, apiKeyIds []string, fromDat
 
 // BillableMetric is the resolver for the billableMetric field.
 func (r *queryResolver) BillableMetric(ctx context.Context, id string) (*model.BillableMetric, error) {
-	panic(fmt.Errorf("not implemented: BillableMetric - billableMetric"))
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("unauthorized")
+	}
+
+	metric, err := r.BillableMetricSvc.GetByID(ctx, orgID, id)
+	if err != nil {
+		return nil, toBillableMetricGQLError(err)
+	}
+
+	return toGQLBillableMetric(metric), nil
 }
 
 // BillableMetrics is the resolver for the billableMetrics field.
 func (r *queryResolver) BillableMetrics(ctx context.Context, aggregationTypes []model.AggregationTypeEnum, limit *int, page *int, planID *string, recurring *bool, searchTerm *string) (*model.BillableMetricCollection, error) {
-	panic(fmt.Errorf("not implemented: BillableMetrics - billableMetrics"))
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("unauthorized")
+	}
+
+	filter := bmsvc.ListFilter{
+		Recurring: recurring,
+	}
+	if searchTerm != nil {
+		filter.Search = *searchTerm
+	}
+	if page != nil {
+		filter.Page = *page
+	}
+	if limit != nil {
+		filter.PerPage = *limit
+	}
+
+	result, err := r.BillableMetricSvc.List(ctx, orgID, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	collection := make([]*model.BillableMetric, 0, len(result.Metrics))
+	for i := range result.Metrics {
+		collection = append(collection, toGQLBillableMetric(&result.Metrics[i]))
+	}
+
+	return &model.BillableMetricCollection{
+		Collection: collection,
+		Metadata: &model.CollectionMetadata{
+			CurrentPage: result.CurrentPage,
+			TotalPages:  result.TotalPages,
+			TotalCount:  int(result.TotalCount),
+			LimitValue:  filter.PerPage,
+		},
+	}, nil
 }
 
 // BillingEntities is the resolver for the billingEntities field.
@@ -1451,3 +1591,91 @@ func (r *Resolver) Query() generated.QueryResolver { return &queryResolver{r} }
 type graphqlSubscriptionResolver struct{ *Resolver }
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
+
+// toGQLBillableMetric converts a DB BillableMetric to a GraphQL BillableMetric model.
+func toGQLBillableMetric(m *models.BillableMetric) *model.BillableMetric {
+	filters := make([]*model.BillableMetricFilter, 0, len(m.Filters))
+	for i := range m.Filters {
+		f := m.Filters[i]
+		values := []string(f.Values)
+		if values == nil {
+			values = []string{}
+		}
+		filters = append(filters, &model.BillableMetricFilter{
+			ID:     f.ID,
+			Key:    f.Key,
+			Values: values,
+		})
+	}
+
+	var deletedAt *string
+	if m.DeletedAt.Valid {
+		s := m.DeletedAt.Time.String()
+		deletedAt = &s
+	}
+
+	return &model.BillableMetric{
+		ID:                m.ID,
+		Name:              m.Name,
+		Code:              m.Code,
+		Description:       m.Description,
+		AggregationType:   model.AggregationTypeEnum(models.AggregationTypeToString(m.AggregationType)),
+		FieldName:         m.FieldName,
+		Recurring:         m.Recurring,
+		Expression:        m.Expression,
+		WeightedInterval:  weightedIntervalFromString(m.WeightedInterval),
+		RoundingFunction:  roundingFunctionFromString(m.RoundingFunction),
+		RoundingPrecision: m.RoundingPrecision,
+		Filters:           filters,
+		CreatedAt:         m.CreatedAt.String(),
+		UpdatedAt:         m.UpdatedAt.String(),
+		DeletedAt:         deletedAt,
+		// Computed flags: require subscription/plan data — return false until Phase 6+.
+		HasActiveSubscriptions: false,
+		HasDraftInvoices:       false,
+		HasPlans:               false,
+		HasSubscriptions:       false,
+	}
+}
+
+func weightedIntervalPtr(wi *model.WeightedIntervalEnum) *string {
+	if wi == nil {
+		return nil
+	}
+	s := string(*wi)
+	return &s
+}
+
+func weightedIntervalFromString(s *string) *model.WeightedIntervalEnum {
+	if s == nil {
+		return nil
+	}
+	v := model.WeightedIntervalEnum(*s)
+	return &v
+}
+
+func roundingFunctionPtr(rf *model.RoundingFunctionEnum) *string {
+	if rf == nil {
+		return nil
+	}
+	s := string(*rf)
+	return &s
+}
+
+func roundingFunctionFromString(s *string) *model.RoundingFunctionEnum {
+	if s == nil {
+		return nil
+	}
+	v := model.RoundingFunctionEnum(*s)
+	return &v
+}
+
+func toBillableMetricGQLError(err error) error {
+	if errors.Is(err, bmsvc.ErrBillableMetricNotFound) {
+		return fmt.Errorf("billable_metric_not_found")
+	}
+	if errors.Is(err, bmsvc.ErrBillableMetricCodeConflict) {
+		return fmt.Errorf("value_already_exist")
+	}
+	return err
+}
