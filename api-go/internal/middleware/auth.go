@@ -7,15 +7,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+
+	"github.com/getlago/lago/api-go/internal/models"
 )
-
-type apiKeyRecord struct {
-	ID             string     `gorm:"column:id"`
-	OrganizationID string     `gorm:"column:organization_id"`
-	ExpiresAt      *time.Time `gorm:"column:expires_at"`
-}
-
-func (apiKeyRecord) TableName() string { return "api_keys" }
 
 func APIKeyAuth(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -28,8 +22,9 @@ func APIKeyAuth(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		var key apiKeyRecord
+		var key models.APIKey
 		result := db.
+			Preload("Organization").
 			Where("value = ? AND (expires_at IS NULL OR expires_at > ?)", token, time.Now()).
 			First(&key)
 
@@ -43,6 +38,8 @@ func APIKeyAuth(db *gorm.DB) gin.HandlerFunc {
 
 		c.Set(GinKeyOrganizationID, key.OrganizationID)
 		c.Set(GinKeyAPIKeyID, key.ID)
+		c.Set(GinKeyAPIKeyPermissions, key.Permissions)
+		c.Set(GinKeyOrganizationPremiumIntegrations, key.Organization.PremiumIntegrations)
 		c.Next()
 	}
 }

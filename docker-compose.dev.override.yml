@@ -1,0 +1,15 @@
+services:
+  db:
+    ports: []
+
+  redis:
+    ports: []
+
+  redpanda:
+    ports: []
+
+  redpanda-kafka-connect:
+    ports: []
+
+  clickhouse:
+    ports: []

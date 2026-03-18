@@ -1,0 +1,112 @@
+---
+description: project conventions and rules
+alwaysApply: true
+---
+
+## General Guidelines
+
+You are a senior programmer with experience for clean programming and design patterns.
+Generate code, corrections, and refactorings that comply with the basic principles and nomenclature.
+
+
+### Task tracking
+
+Use `bd` for task tracking
+
+### Pipeline Steps. FOLLOW IN STRICT ORDER.
+
+- Use `bd` for task tracking
+- Analyze request → extract _clear, minimal_ requirements -> save research results into plan file.
+- Research options → favor _low-complexity, high-impact_ path -> save research results into plan file.
+- Develop concise solution plan, avoid overengineering.
+- **Implement with Integration-First Testing** → Tests must catch real bugs, not just pass
+- **Tests FAIL when code is broken** → Use real database, real functions, real flows
+- **Before marking plan DONE or marking the last todo of the plan → re-run all test suites → must pass**
+  Repeat if scope grows — but never violate MVP-first rule.
+- Use MCP tools when needed.
+
+### Basic Principles
+
+- Use English for all code and documentation.
+- Diagram using mermaid.
+- Write code that is clean, simple, and purposeful — the next reader must understand intent without needing comments.
+- Always declare the type of each variable and function (parameters and return value).
+- Prefer `Map` + `Set` for O(1) lookups over repeated array scans.
+- DRY > WET — refactor duplication only after it appears 2+ times.
+- Centralize: Config, Constants, Logging, Errors, Data access.
+- Use inversion of control → dependency injection preferred.
+- Interface-driven design → enables modular swapping.
+- Favor composition > inheritance.
+- Abstract API/services → use adapters, clients, or gateways.
+- Keep decisions **reversible** → avoid early commitments to implementations.
+- Validate logic and coherence before generating code.
+- Detect contradictions, bias, or paradoxes → pause and request clarification.
+- Break down complex requests into smaller, independently deliverable sub-tasks.
+
+### Naming
+
+- Use PascalCase for classes.
+- Use camelCase for variables, functions, and methods.
+- Use camelCase for column name.
+- Use kebab-case for file and directory names.
+- Use UPPERCASE for environment variables.
+  - Avoid magic numbers and define constants.
+- Start each function with a verb.
+- Use verbs for boolean variables. Example: isLoading, hasError, canDelete, etc.
+- Use complete words instead of abbreviations and correct spelling.
+  - Except for standard abbreviations like API, URL, etc.
+  - Except for well-known abbreviations: - i, j for loops - err for errors - ctx for contexts - req, res, next for middleware function parameters
+
+### Function Rule
+
+- Functions <50 lines → must be focused and testable
+- One job per function → no blending of concerns
+- Name functions with a verb and something else.
+  - If it returns a boolean, use isX or hasX, canX, etc.
+  - If it doesn't return anything, use executeX or saveX, etc.
+- Avoid nesting blocks by:
+  - Early checks and returns.
+  - Extraction to utility functions.
+- Use higher-order functions (map, filter, reduce, etc.) to avoid function nesting.
+  - Use arrow functions for simple functions (less than 3 instructions).
+  - Use named functions for non-simple functions.
+- Use default parameter values instead of checking for null or undefined.
+- Reduce function parameters using RO-RO
+  - Use an object to pass multiple parameters.
+  - Use an object to return results.
+  - Declare necessary types for input arguments and output.
+- Use a single level of abstraction.
+
+### File and Class Rule
+
+- Follow SOLID principles.
+- Apply strategy pattern.
+- Write small classes with a single purpose.
+  - Less than 200 instructions.
+  - Less than 10 public methods.
+  - Less than 10 properties.
+- Files <500 lines → modularize aggressively → extract logic into utils, features, modules.
+
+### Unit testing
+
+**CRITICAL**: Tests must catch real bugs, not just provide green checkmarks
+
+- Follow the Arrange-Act-Assert convention for tests.
+- Name test variables clearly.
+  - Follow the convention: inputX, mockX, actualX, expectedX, etc.
+- Write unit tests for each public function.
+  - Use test doubles to simulate dependencies.
+    - Except for third-party dependencies that are not expensive to execute.
+- Write acceptance tests for each module.
+  - Follow the Given-When-Then convention.
+
+### Error Handling
+
+- Module-level custom error classes extending http exception.
+- Use exceptions to handle errors you don't expect.
+- If you catch an exception, it should be to:
+  - Fix an expected problem.
+  - Add context.
+  - Otherwise, use a global handler.
+- Preserve error context: status codes, API responses, error messages.
+- Use `BadRequestException`, `NotFoundException` for controller-level validation.

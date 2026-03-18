@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": ".agent/hooks/copilot-session-start.sh",
+        "timeout": 15
+      }
+    ],
+    "PreCompact": [
+      {
+        "type": "command",
+        "command": ".agent/hooks/audit.sh",
+        "timeout": 15
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": ".agent/hooks/copilot-stop.sh",
+        "timeout": 15
+      }
+    ]
+  }
+}

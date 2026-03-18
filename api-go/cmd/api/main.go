@@ -15,6 +15,7 @@ import (
 	"github.com/getlago/lago/api-go/config"
 	"github.com/getlago/lago/api-go/config/database"
 	cfgredis "github.com/getlago/lago/api-go/config/redis"
+	kafkapkg "github.com/getlago/lago/api-go/internal/kafka"
 	"github.com/getlago/lago/api-go/internal/server"
 	"github.com/getlago/lago/api-go/utils"
 )
@@ -68,7 +69,8 @@ func main() {
 	}
 
 	version := utils.GetEnvOrDefault("APP_VERSION", "dev")
-	engine := server.New(db.Connection, sqlDB, version)
+	eventPublisher := buildEventPublisher(cfg)
+	engine := server.New(db.Connection, sqlDB, version, cfg.JWTSecret, eventPublisher)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%s", cfg.Port),
@@ -99,4 +101,30 @@ func main() {
 	}
 
 	slog.Info("server stopped")
+}
+
+func buildEventPublisher(cfg *config.Config) kafkapkg.EventPublisher {
+	if cfg.KafkaBootstrapServers == "" {
+		slog.Info("kafka not configured, events will not be published to kafka")
+		return &kafkapkg.NoopPublisher{}
+	}
+
+	publisher, err := kafkapkg.NewKafkaPublisher(kafkapkg.Config{
+		BootstrapServers: cfg.KafkaBootstrapServers,
+		Topic:            cfg.KafkaRawEventsTopic,
+		TLS:              cfg.KafkaTLS,
+		ScramAlgorithm:   cfg.KafkaScramAlgorithm,
+		Username:         cfg.KafkaUsername,
+		Password:         cfg.KafkaPassword,
+	})
+	if err != nil {
+		slog.Warn("failed to initialize kafka producer, falling back to noop", slog.String("error", err.Error()))
+		return &kafkapkg.NoopPublisher{}
+	}
+
+	slog.Info("kafka producer initialized",
+		slog.String("bootstrap_servers", cfg.KafkaBootstrapServers),
+		slog.String("topic", cfg.KafkaRawEventsTopic),
+	)
+	return publisher
 }
