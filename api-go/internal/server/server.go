@@ -14,11 +14,13 @@ import (
 	authhandlers "github.com/getlago/lago/api-go/internal/handlers/auth"
 	customerhandlers "github.com/getlago/lago/api-go/internal/handlers/customers"
 	eventhandlers "github.com/getlago/lago/api-go/internal/handlers/events"
+	invoicehandlers "github.com/getlago/lago/api-go/internal/handlers/invoices"
 	organizationhandlers "github.com/getlago/lago/api-go/internal/handlers/organizations"
 	kafkapkg "github.com/getlago/lago/api-go/internal/kafka"
 	"github.com/getlago/lago/api-go/internal/middleware"
 	customerservices "github.com/getlago/lago/api-go/internal/services/customers"
 	eventservices "github.com/getlago/lago/api-go/internal/services/events"
+	invoiceservices "github.com/getlago/lago/api-go/internal/services/invoices"
 	organizationservices "github.com/getlago/lago/api-go/internal/services/organizations"
 	"github.com/getlago/lago/api-go/internal/services/users"
 )
@@ -43,6 +45,7 @@ func New(db *gorm.DB, sqlDB *sql.DB, version string, jwtSecret string, eventPubl
 	customersSvc := customerservices.NewService(db)
 	eventsSvc := eventservices.NewService(db, eventPublisher)
 	organizationSvc := organizationservices.NewService(db)
+	invoicesSvc := invoiceservices.NewService(db)
 	graphQLServer := handler.NewDefaultServer(generated.NewExecutableSchema(generated.Config{
 		Resolvers: &graphql.Resolver{},
 	}))
@@ -70,6 +73,11 @@ func New(db *gorm.DB, sqlDB *sql.DB, version string, jwtSecret string, eventPubl
 		v1.POST("/events/batch", middleware.RequirePermission("event", ""), eventhandlers.CreateBatch(eventsSvc))
 		v1.GET("/events", middleware.RequirePermission("event", ""), eventhandlers.List(eventsSvc))
 		v1.GET("/events/estimate_fees", middleware.RequirePermission("event", ""), eventhandlers.EstimateFees(eventsSvc))
+		v1.POST("/invoices", middleware.RequirePermission("invoice", "write"), invoicehandlers.Create(invoicesSvc))
+		v1.GET("/invoices", middleware.RequirePermission("invoice", "read"), invoicehandlers.Index(invoicesSvc))
+		v1.GET("/invoices/:id", middleware.RequirePermission("invoice", "read"), invoicehandlers.Show(invoicesSvc))
+		v1.PUT("/invoices/:id/finalize", middleware.RequirePermission("invoice", "write"), invoicehandlers.Finalize(invoicesSvc))
+		v1.PUT("/invoices/:id/void", middleware.RequirePermission("invoice", "write"), invoicehandlers.Void(invoicesSvc))
 
 		// Phase 4+ routes registered here as each phase is implemented.
 	}

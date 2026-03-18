@@ -53,3 +53,7 @@ For EACH issue, identify and extract the following:
 - Review the bd issue and update its status to reflect the current state of implementation (e.g., in-progress, review, done).
 - Add any relevant comments or notes to the issue for context.
 - Reminder: run `bd dolt push` and `git push` before ending the session.
+
+## Step 6: Handoff to Next Agent
+
+- Compact the session context and handoff to the next agent - continue implementation, review, or testing agent as appropriate.
