@@ -3,8 +3,6 @@ package invoices
 import (
 	"errors"
 	"time"
-
-	"github.com/getlago/lago/api-go/internal/models"
 )
 
 var (
@@ -16,53 +14,53 @@ var (
 
 // CanFinalize reports whether the invoice may transition to Finalized.
 // Allowed source states: Draft, Generating.
-func CanFinalize(invoice *models.Invoice) bool {
-	return invoice.Status == models.InvoiceStatusDraft ||
-		invoice.Status == models.InvoiceStatusGenerating
+func CanFinalize(state *InvoiceState) bool {
+	return state.Status == InvoiceStatusDraft ||
+		state.Status == InvoiceStatusGenerating
 }
 
 // CanVoid reports whether the invoice may transition to Voided.
 // Only Finalized invoices can be voided.
-func CanVoid(invoice *models.Invoice) bool {
-	return invoice.Status == models.InvoiceStatusFinalized
+func CanVoid(state *InvoiceState) bool {
+	return state.Status == InvoiceStatusFinalized
 }
 
-// ApplyFinalize transitions the invoice to Finalized and stamps FinalizedAt.
+// ApplyFinalize transitions the state to Finalized and stamps FinalizedAt.
 // Returns a domain error if the transition is not allowed.
-func ApplyFinalize(invoice *models.Invoice) error {
-	switch invoice.Status {
-	case models.InvoiceStatusFinalized:
+func ApplyFinalize(state *InvoiceState) error {
+	switch state.Status {
+	case InvoiceStatusFinalized:
 		return ErrAlreadyFinalized
-	case models.InvoiceStatusVoided:
+	case InvoiceStatusVoided:
 		return ErrAlreadyVoided
 	}
 
-	if !CanFinalize(invoice) {
+	if !CanFinalize(state) {
 		return ErrInvalidTransition
 	}
 
 	now := time.Now()
-	invoice.Status = models.InvoiceStatusFinalized
-	invoice.FinalizedAt = &now
+	state.Status = InvoiceStatusFinalized
+	state.FinalizedAt = &now
 	return nil
 }
 
-// ApplyVoid transitions the invoice to Voided and stamps VoidedAt.
+// ApplyVoid transitions the state to Voided and stamps VoidedAt.
 // Returns a domain error if the transition is not allowed.
-func ApplyVoid(invoice *models.Invoice) error {
-	switch invoice.Status {
-	case models.InvoiceStatusVoided:
+func ApplyVoid(state *InvoiceState) error {
+	switch state.Status {
+	case InvoiceStatusVoided:
 		return ErrAlreadyVoided
-	case models.InvoiceStatusDraft:
+	case InvoiceStatusDraft:
 		return ErrCannotVoidDraft
 	}
 
-	if !CanVoid(invoice) {
+	if !CanVoid(state) {
 		return ErrInvalidTransition
 	}
 
 	now := time.Now()
-	invoice.Status = models.InvoiceStatusVoided
-	invoice.VoidedAt = &now
+	state.Status = InvoiceStatusVoided
+	state.VoidedAt = &now
 	return nil
 }

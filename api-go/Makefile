@@ -57,3 +57,8 @@ migrate-down:
 
 migrate-status:
 	migrate -path migrations -database "$$DATABASE_URL" version
+
+# -- Format file using Prettier (for .graphql files) and gofmt (for .go files) ---
+format:
+	prettier --write "**/*.graphql"
+	gofmt -s -w .

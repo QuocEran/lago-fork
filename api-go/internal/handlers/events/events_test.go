@@ -81,8 +81,8 @@ func TestCreateEventReturnsSuccess(t *testing.T) {
 			timestamp := time.Now().UTC()
 			return &eventservices.IngestedEvent{
 				Event: &models.Event{
-					BaseModel:      models.BaseModel{ID: "evt-1"},
-					OrganizationID: organizationID,
+					SoftDeleteModel: models.SoftDeleteModel{BaseModel: models.BaseModel{ID: "evt-1"}},
+					OrganizationID:  organizationID,
 					TransactionID:  input.TransactionID,
 					Code:           input.Code,
 					Timestamp:      &timestamp,
@@ -110,7 +110,7 @@ func TestCreateEventReturnsSuccess(t *testing.T) {
 
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, http.StatusCreated, w.Code)
 	assert.Contains(t, w.Body.String(), "\"lago_id\":\"evt-1\"")
 	assert.Contains(t, w.Body.String(), "\"created\":true")
 }
@@ -125,10 +125,10 @@ func TestCreateEventSupportsIdempotentDuplicate(t *testing.T) {
 			created := callCount == 1
 			return &eventservices.IngestedEvent{
 				Event: &models.Event{
-					BaseModel:      models.BaseModel{ID: "evt-duplicate"},
-					OrganizationID: organizationID,
-					TransactionID:  input.TransactionID,
-					Code:           input.Code,
+					SoftDeleteModel: models.SoftDeleteModel{BaseModel: models.BaseModel{ID: "evt-duplicate"}},
+					OrganizationID:  organizationID,
+					TransactionID:   input.TransactionID,
+					Code:            input.Code,
 				},
 				Created: created,
 			}, nil
@@ -159,8 +159,8 @@ func TestCreateEventSupportsIdempotentDuplicate(t *testing.T) {
 	secondReq.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(second, secondReq)
 
-	assert.Equal(t, http.StatusOK, first.Code)
-	assert.Equal(t, http.StatusOK, second.Code)
+	assert.Equal(t, http.StatusCreated, first.Code)
+	assert.Equal(t, http.StatusCreated, second.Code)
 	assert.Contains(t, first.Body.String(), "\"created\":true")
 	assert.Contains(t, second.Body.String(), "\"created\":false")
 }
@@ -171,11 +171,11 @@ func TestListEventsReturnsPagedResults(t *testing.T) {
 	now := time.Now().UTC()
 	mockEvents := []models.Event{
 		{
-			BaseModel:      models.BaseModel{ID: "evt-1"},
-			OrganizationID: "org-1",
+			SoftDeleteModel: models.SoftDeleteModel{BaseModel: models.BaseModel{ID: "evt-1"}},
+			OrganizationID:  "org-1",
 			TransactionID:  "tx-1",
-			Code:           "api_calls",
-			Timestamp:      &now,
+			Code:            "api_calls",
+			Timestamp:       &now,
 		},
 	}
 	mockPagination := &eventservices.Pagination{

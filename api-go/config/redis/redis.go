@@ -57,3 +57,8 @@ func NewRedisDB(ctx context.Context, cfg Config) (*RedisDB, error) {
 
 	return &RedisDB{Client: client}, nil
 }
+
+// Close releases the Redis connection pool.
+func (r *RedisDB) Close() error {
+	return r.Client.Close()
+}

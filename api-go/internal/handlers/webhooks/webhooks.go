@@ -6,10 +6,10 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 
-	"github.com/getlago/lago/api-go/internal/middleware"
+	"github.com/getlago/lago/api-go/internal/handlers/shared"
 	"github.com/getlago/lago/api-go/internal/models"
+	webhooksvc "github.com/getlago/lago/api-go/internal/services/webhooks"
 )
 
 // ── response types ─────────────────────────────────────────────────────────────
@@ -28,16 +28,8 @@ type webhookBody struct {
 }
 
 type listResponse struct {
-	Webhooks []webhookBody `json:"webhooks"`
-	Meta     pageMeta      `json:"meta"`
-}
-
-type pageMeta struct {
-	CurrentPage int   `json:"current_page"`
-	NextPage    *int  `json:"next_page"`
-	PrevPage    *int  `json:"prev_page"`
-	TotalPages  int   `json:"total_pages"`
-	TotalCount  int64 `json:"total_count"`
+	Webhooks []webhookBody         `json:"webhooks"`
+	Meta     shared.PaginationMeta `json:"meta"`
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────────
@@ -63,23 +55,13 @@ func toWebhookBody(w *models.Webhook) webhookBody {
 	}
 }
 
-func organizationIDFromContext(c *gin.Context) (string, bool) {
-	v, ok := c.Get(middleware.GinKeyOrganizationID)
-	if !ok {
-		return "", false
-	}
-	s, ok := v.(string)
-	return s, ok
-}
-
 // ── handlers ───────────────────────────────────────────────────────────────────
 
 // Index handles GET /api/v1/webhooks — list outbound webhooks for the org.
-func Index(db *gorm.DB) gin.HandlerFunc {
+func Index(svc webhooksvc.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		orgID, ok := organizationIDFromContext(c)
+		orgID, ok := shared.OrganizationIDFromContext(c)
 		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			return
 		}
 
@@ -91,20 +73,10 @@ func Index(db *gorm.DB) gin.HandlerFunc {
 		if page <= 0 {
 			page = 1
 		}
-		offset := (page - 1) * limit
 
-		var total int64
-		if err := db.Model(&models.Webhook{}).Where("organization_id = ?", orgID).Count(&total).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal_error"})
-			return
-		}
-
-		var ws []models.Webhook
-		if err := db.Where("organization_id = ?", orgID).
-			Order("created_at DESC").
-			Limit(limit).Offset(offset).
-			Find(&ws).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal_error"})
+		ws, total, err := svc.List(c.Request.Context(), orgID, page, limit)
+		if err != nil {
+			shared.RespondError(c, http.StatusInternalServerError, "internal_error", gin.H{})
 			return
 		}
 
@@ -126,7 +98,7 @@ func Index(db *gorm.DB) gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, listResponse{
 			Webhooks: bodies,
-			Meta: pageMeta{
+			Meta: shared.PaginationMeta{
 				CurrentPage: page,
 				NextPage:    nextPage,
 				PrevPage:    prevPage,
@@ -138,23 +110,21 @@ func Index(db *gorm.DB) gin.HandlerFunc {
 }
 
 // Show handles GET /api/v1/webhooks/:id.
-func Show(db *gorm.DB) gin.HandlerFunc {
+func Show(svc webhooksvc.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		orgID, ok := organizationIDFromContext(c)
+		orgID, ok := shared.OrganizationIDFromContext(c)
 		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			return
 		}
-		var wh models.Webhook
-		err := db.Where("id = ? AND organization_id = ?", c.Param("id"), orgID).First(&wh).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "webhook_not_found"})
-			return
-		}
+		wh, err := svc.GetByID(c.Request.Context(), orgID, c.Param("id"))
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal_error"})
+			if errors.Is(err, webhooksvc.ErrWebhookNotFound) {
+				shared.RespondError(c, http.StatusNotFound, "webhook_not_found", gin.H{})
+				return
+			}
+			shared.RespondError(c, http.StatusInternalServerError, "internal_error", gin.H{})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"webhook": toWebhookBody(&wh)})
+		c.JSON(http.StatusOK, gin.H{"webhook": toWebhookBody(wh)})
 	}
 }

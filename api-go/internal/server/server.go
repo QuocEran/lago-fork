@@ -13,18 +13,18 @@ import (
 	"github.com/getlago/lago/api-go/internal/graphql/generated"
 	"github.com/getlago/lago/api-go/internal/handlers"
 	authhandlers "github.com/getlago/lago/api-go/internal/handlers/auth"
-	bmhandlers "github.com/getlago/lago/api-go/internal/handlers/billable_metrics"
+	bmhandlers "github.com/getlago/lago/api-go/internal/handlers/billablemetrics"
 	customerhandlers "github.com/getlago/lago/api-go/internal/handlers/customers"
 	eventhandlers "github.com/getlago/lago/api-go/internal/handlers/events"
 	invoicehandlers "github.com/getlago/lago/api-go/internal/handlers/invoices"
 	organizationhandlers "github.com/getlago/lago/api-go/internal/handlers/organizations"
 	planhandlers "github.com/getlago/lago/api-go/internal/handlers/plans"
 	subhandlers "github.com/getlago/lago/api-go/internal/handlers/subscriptions"
-	wehandlers "github.com/getlago/lago/api-go/internal/handlers/webhook_endpoints"
+	wehandlers "github.com/getlago/lago/api-go/internal/handlers/webhookendpoints"
 	webhookhandlers "github.com/getlago/lago/api-go/internal/handlers/webhooks"
 	kafkapkg "github.com/getlago/lago/api-go/internal/kafka"
 	"github.com/getlago/lago/api-go/internal/middleware"
-	bmservices "github.com/getlago/lago/api-go/internal/services/billable_metrics"
+	bmservices "github.com/getlago/lago/api-go/internal/services/billablemetrics"
 	customerservices "github.com/getlago/lago/api-go/internal/services/customers"
 	eventservices "github.com/getlago/lago/api-go/internal/services/events"
 	invoiceservices "github.com/getlago/lago/api-go/internal/services/invoices"
@@ -32,7 +32,8 @@ import (
 	planservices "github.com/getlago/lago/api-go/internal/services/plans"
 	subservices "github.com/getlago/lago/api-go/internal/services/subscriptions"
 	"github.com/getlago/lago/api-go/internal/services/users"
-	wesvc "github.com/getlago/lago/api-go/internal/services/webhook_endpoints"
+	webhooksvc "github.com/getlago/lago/api-go/internal/services/webhooks"
+	wesvc "github.com/getlago/lago/api-go/internal/services/webhookendpoints"
 )
 
 func New(db *gorm.DB, sqlDB *sql.DB, version string, jwtSecret string, eventPublisher kafkapkg.EventPublisher) *gin.Engine {
@@ -60,11 +61,17 @@ func New(db *gorm.DB, sqlDB *sql.DB, version string, jwtSecret string, eventPubl
 	plansSvc := planservices.NewService(db)
 	subscriptionsSvc := subservices.NewService(db)
 	webhookEndpointsSvc := wesvc.NewService(db)
+	webhooksSvc := webhooksvc.NewService(db)
+	stripeSecret := os.Getenv("STRIPE_WEBHOOK_SECRET")
+	webhookInboundSvc := webhooksvc.NewInboundService(db, stripeSecret)
 
 	graphQLServer := handler.NewDefaultServer(generated.NewExecutableSchema(generated.Config{
 		Resolvers: &graphql.Resolver{
 			BillableMetricSvc:   billableMetricsSvc,
+			CustomerSvc:        customersSvc,
+			EventSvc:            eventsSvc,
 			InvoiceSvc:          invoicesSvc,
+			OrganizationSvc:    organizationSvc,
 			PlanSvc:             plansSvc,
 			SubscriptionSvc:     subscriptionsSvc,
 			WebhookEndpointSvc:  webhookEndpointsSvc,
@@ -76,14 +83,12 @@ func New(db *gorm.DB, sqlDB *sql.DB, version string, jwtSecret string, eventPubl
 	graphQLServer.SetErrorPresenter(graphql.ErrorPresenter)
 	r.POST("/graphql",
 		middleware.GraphQLAPIKeyContext(db),
-		middleware.GraphQLDataLoaders(db),
 		gin.WrapH(graphQLServer),
 	)
 
 	// Inbound webhook routes — no API key auth, provider-specific signature validation.
-	stripeSecret := os.Getenv("STRIPE_WEBHOOK_SECRET")
-	r.POST("/webhooks/stripe/:organization_id", webhookhandlers.StripeWebhook(db, stripeSecret))
-	r.POST("/webhooks/gocardless/:organization_id", webhookhandlers.GocardlessWebhook(db))
+	r.POST("/webhooks/stripe/:organization_id", webhookhandlers.StripeWebhook(webhookInboundSvc))
+	r.POST("/webhooks/gocardless/:organization_id", webhookhandlers.GocardlessWebhook(webhookInboundSvc))
 
 	v1 := r.Group("/api/v1")
 	v1.Use(middleware.APIKeyAuth(db))
@@ -133,8 +138,8 @@ func New(db *gorm.DB, sqlDB *sql.DB, version string, jwtSecret string, eventPubl
 		v1.DELETE("/webhook_endpoints/:id", middleware.RequirePermission("webhook_endpoint", "write"), wehandlers.Destroy(webhookEndpointsSvc))
 
 		// Outbound webhook listing.
-		v1.GET("/webhooks", middleware.RequirePermission("webhook", "read"), webhookhandlers.Index(db))
-		v1.GET("/webhooks/:id", middleware.RequirePermission("webhook", "read"), webhookhandlers.Show(db))
+		v1.GET("/webhooks", middleware.RequirePermission("webhook", "read"), webhookhandlers.Index(webhooksSvc))
+		v1.GET("/webhooks/:id", middleware.RequirePermission("webhook", "read"), webhookhandlers.Show(webhooksSvc))
 	}
 
 	return r

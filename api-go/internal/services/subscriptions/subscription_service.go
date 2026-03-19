@@ -272,12 +272,22 @@ func (s *service) Terminate(ctx context.Context, organizationID, id string) (*mo
 		return nil, err
 	}
 
-	if err := domain.ApplyTerminate(sub); err != nil {
+	state := domain.SubscriptionState{
+		Status:        domain.SubscriptionStatus(sub.Status),
+		StartedAt:     sub.StartedAt,
+		CanceledAt:    sub.CanceledAt,
+		TerminatedAt:  sub.TerminatedAt,
+	}
+	if err := domain.ApplyTerminate(&state); err != nil {
 		if errors.Is(err, domain.ErrAlreadyTerminated) || errors.Is(err, domain.ErrAlreadyCanceled) {
 			return nil, &ValidationError{Message: err.Error()}
 		}
 		return nil, &ValidationError{Message: err.Error()}
 	}
+	sub.Status = models.SubscriptionStatus(state.Status)
+	sub.StartedAt = state.StartedAt
+	sub.CanceledAt = state.CanceledAt
+	sub.TerminatedAt = state.TerminatedAt
 
 	updates := map[string]any{"status": int(sub.Status)}
 	if sub.TerminatedAt != nil {

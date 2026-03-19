@@ -26,7 +26,7 @@ func Ready(sqlDB *sql.DB) gin.HandlerFunc {
 		if err := sqlDB.Ping(); err != nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{
 				"status": "not_ready",
-				"error":  err.Error(),
+				"error":  "database not ready",
 			})
 			return
 		}

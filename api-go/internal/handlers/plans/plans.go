@@ -8,10 +8,24 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/getlago/lago/api-go/internal/middleware"
+	"github.com/getlago/lago/api-go/internal/handlers/shared"
 	"github.com/getlago/lago/api-go/internal/models"
 	plansvc "github.com/getlago/lago/api-go/internal/services/plans"
 )
+
+var planErrorClassifier = shared.ServiceErrorClassifier{
+	NotFoundErrors:  []error{plansvc.ErrPlanNotFound},
+	ConflictErrors:  []error{plansvc.ErrPlanCodeConflict},
+	IsValidationErr: plansvc.IsValidationError,
+	NotFoundCode:    "plan_not_found",
+	ConflictCode:    "value_already_exist",
+	ConflictDetails: func(err error) map[string]any {
+		if errors.Is(err, plansvc.ErrPlanCodeConflict) {
+			return map[string]any{"code": []string{"value_already_exist"}}
+		}
+		return nil
+	},
+}
 
 // ── request types ─────────────────────────────────────────────────────────────
 
@@ -113,64 +127,53 @@ type planResponse struct {
 	UpdatedAt               time.Time        `json:"updated_at"`
 }
 
-type paginationMeta struct {
-	CurrentPage int   `json:"current_page"`
-	NextPage    *int  `json:"next_page"`
-	PrevPage    *int  `json:"prev_page"`
-	TotalPages  int   `json:"total_pages"`
-	TotalCount  int64 `json:"total_count"`
-}
-
 // ── handlers ──────────────────────────────────────────────────────────────────
 
 // Create handles POST /api/v1/plans.
 func Create(svc plansvc.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		orgID, ok := organizationIDFromContext(c)
+		orgID, ok := shared.OrganizationIDFromContext(c)
 		if !ok {
 			return
 		}
 		var req createEnvelope
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error_code": "validation_error", "error_details": gin.H{"message": err.Error()}})
+			shared.RespondError(c, http.StatusBadRequest, "validation_error", gin.H{"message": err.Error()})
 			return
 		}
 		input := toCreateInput(req.Plan)
 		plan, err := svc.Create(c.Request.Context(), orgID, input)
 		if err != nil {
-			handleServiceError(c, err)
+			shared.HandleServiceError(c, err, planErrorClassifier)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"plan": toPlanResponse(plan)})
+		shared.RespondJSON(c, http.StatusCreated, "plan", toPlanResponse(plan))
 	}
 }
 
 // Index handles GET /api/v1/plans.
 func Index(svc plansvc.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		orgID, ok := organizationIDFromContext(c)
+		orgID, ok := shared.OrganizationIDFromContext(c)
 		if !ok {
 			return
 		}
 		filter := parseListFilter(c)
 		result, err := svc.List(c.Request.Context(), orgID, filter)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "error_code": "internal_error", "error_details": gin.H{}})
+			shared.HandleServiceError(c, err, planErrorClassifier)
 			return
 		}
 		items := make([]planResponse, 0, len(result.Plans))
 		for i := range result.Plans {
 			items = append(items, toPlanResponse(&result.Plans[i]))
 		}
-		c.JSON(http.StatusOK, gin.H{
-			"plans": items,
-			"meta": paginationMeta{
-				CurrentPage: result.CurrentPage,
-				NextPage:    result.NextPage,
-				PrevPage:    result.PrevPage,
-				TotalPages:  result.TotalPages,
-				TotalCount:  result.TotalCount,
-			},
+		shared.RespondList(c, "plans", items, shared.PaginationMeta{
+			CurrentPage: result.CurrentPage,
+			NextPage:    result.NextPage,
+			PrevPage:    result.PrevPage,
+			TotalPages:  result.TotalPages,
+			TotalCount:  result.TotalCount,
 		})
 	}
 }
@@ -178,14 +181,14 @@ func Index(svc plansvc.Service) gin.HandlerFunc {
 // Show handles GET /api/v1/plans/:code.
 func Show(svc plansvc.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		orgID, ok := organizationIDFromContext(c)
+		orgID, ok := shared.OrganizationIDFromContext(c)
 		if !ok {
 			return
 		}
 		code := c.Param("code")
 		plan, err := svc.GetByCode(c.Request.Context(), orgID, code)
 		if err != nil {
-			handleServiceError(c, err)
+			shared.HandleServiceError(c, err, planErrorClassifier)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"plan": toPlanResponse(plan)})
@@ -195,20 +198,20 @@ func Show(svc plansvc.Service) gin.HandlerFunc {
 // Update handles PUT /api/v1/plans/:code.
 func Update(svc plansvc.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		orgID, ok := organizationIDFromContext(c)
+		orgID, ok := shared.OrganizationIDFromContext(c)
 		if !ok {
 			return
 		}
 		var req updateEnvelope
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error_code": "validation_error", "error_details": gin.H{"message": err.Error()}})
+			shared.RespondError(c, http.StatusBadRequest, "validation_error", gin.H{"message": err.Error()})
 			return
 		}
 		code := c.Param("code")
 		input := toUpdateInput(req.Plan)
 		plan, err := svc.Update(c.Request.Context(), orgID, code, input)
 		if err != nil {
-			handleServiceError(c, err)
+			shared.HandleServiceError(c, err, planErrorClassifier)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"plan": toPlanResponse(plan)})
@@ -218,14 +221,14 @@ func Update(svc plansvc.Service) gin.HandlerFunc {
 // Destroy handles DELETE /api/v1/plans/:code.
 func Destroy(svc plansvc.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		orgID, ok := organizationIDFromContext(c)
+		orgID, ok := shared.OrganizationIDFromContext(c)
 		if !ok {
 			return
 		}
 		code := c.Param("code")
 		plan, err := svc.Delete(c.Request.Context(), orgID, code)
 		if err != nil {
-			handleServiceError(c, err)
+			shared.HandleServiceError(c, err, planErrorClassifier)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"plan": toPlanResponse(plan)})
@@ -233,33 +236,6 @@ func Destroy(svc plansvc.Service) gin.HandlerFunc {
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
-
-func organizationIDFromContext(c *gin.Context) (string, bool) {
-	value, exists := c.Get(middleware.GinKeyOrganizationID)
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"status": "unauthorized", "error": "missing_organization_context"})
-		return "", false
-	}
-	orgID, ok := value.(string)
-	if !ok || orgID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"status": "unauthorized", "error": "invalid_organization_context"})
-		return "", false
-	}
-	return orgID, true
-}
-
-func handleServiceError(c *gin.Context, err error) {
-	switch {
-	case errors.Is(err, plansvc.ErrPlanNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"status": "error", "error_code": "plan_not_found", "error_details": gin.H{}})
-	case errors.Is(err, plansvc.ErrPlanCodeConflict):
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"status": "error", "error_code": "value_already_exist", "error_details": gin.H{"code": []string{"value_already_exist"}}})
-	case plansvc.IsValidationError(err):
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"status": "error", "error_code": "validation_error", "error_details": gin.H{"message": err.Error()}})
-	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "error_code": "internal_error", "error_details": gin.H{}})
-	}
-}
 
 func toCreateInput(req createPlanRequest) plansvc.CreateInput {
 	return plansvc.CreateInput{

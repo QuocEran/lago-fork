@@ -182,9 +182,17 @@ func (s *service) Finalize(ctx context.Context, organizationID string, id string
 		return nil, err
 	}
 
-	if err := domain.ApplyFinalize(invoice); err != nil {
+	state := domain.InvoiceState{
+		Status:      domain.InvoiceStatus(invoice.Status),
+		FinalizedAt: invoice.FinalizedAt,
+		VoidedAt:    invoice.VoidedAt,
+	}
+	if err := domain.ApplyFinalize(&state); err != nil {
 		return nil, err
 	}
+	invoice.Status = models.InvoiceStatus(state.Status)
+	invoice.FinalizedAt = state.FinalizedAt
+	invoice.VoidedAt = state.VoidedAt
 
 	// Compute totals from associated fees in a transaction.
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -211,9 +219,17 @@ func (s *service) Void(ctx context.Context, organizationID string, id string) (*
 		return nil, err
 	}
 
-	if err := domain.ApplyVoid(invoice); err != nil {
+	state := domain.InvoiceState{
+		Status:      domain.InvoiceStatus(invoice.Status),
+		FinalizedAt: invoice.FinalizedAt,
+		VoidedAt:    invoice.VoidedAt,
+	}
+	if err := domain.ApplyVoid(&state); err != nil {
 		return nil, err
 	}
+	invoice.Status = models.InvoiceStatus(state.Status)
+	invoice.FinalizedAt = state.FinalizedAt
+	invoice.VoidedAt = state.VoidedAt
 
 	if err := s.db.WithContext(ctx).Save(invoice).Error; err != nil {
 		return nil, err

@@ -14,10 +14,10 @@ import (
 func TestNoopPublisher_PublishRawEvent(t *testing.T) {
 	publisher := &kafka.NoopPublisher{}
 	inputEvent := &models.Event{
-		BaseModel:      models.BaseModel{ID: "evt-1"},
-		OrganizationID: "org-1",
-		TransactionID:  "tx-1",
-		Code:           "usage.created",
+		SoftDeleteModel: models.SoftDeleteModel{BaseModel: models.BaseModel{ID: "evt-1"}},
+		OrganizationID:  "org-1",
+		TransactionID:   "tx-1",
+		Code:            "usage.created",
 	}
 
 	err := publisher.PublishRawEvent(context.Background(), inputEvent)

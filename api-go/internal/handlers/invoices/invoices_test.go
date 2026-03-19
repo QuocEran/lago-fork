@@ -125,7 +125,7 @@ func TestCreateInvoiceSuccess(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(response, request)
 
-	assert.Equal(t, http.StatusOK, response.Code)
+	assert.Equal(t, http.StatusCreated, response.Code)
 	assert.Contains(t, response.Body.String(), `"lago_id":"invoice-uuid-1"`)
 }
 

@@ -1,15 +1,20 @@
 package organizations
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/getlago/lago/api-go/internal/middleware"
+	"github.com/getlago/lago/api-go/internal/handlers/shared"
 	"github.com/getlago/lago/api-go/internal/models"
 	organizationservices "github.com/getlago/lago/api-go/internal/services/organizations"
 )
+
+var organizationErrorClassifier = shared.ServiceErrorClassifier{
+	NotFoundErrors:  []error{organizationservices.ErrOrganizationNotFound},
+	IsValidationErr: organizationservices.IsValidationError,
+	NotFoundCode:    "organization_not_found",
+}
 
 type updateOrganizationRequest struct {
 	Organization organizationservices.UpdateOrganizationInput `json:"organization" binding:"required"`
@@ -52,21 +57,14 @@ type showOrganizationEnvelope struct {
 
 func Show(svc organizationservices.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		organizationID, exists := c.Get(middleware.GinKeyOrganizationID)
-		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{"status": "unauthorized", "error": "missing_organization_context"})
-			return
-		}
-
-		organizationIDValue, ok := organizationID.(string)
-		if !ok || organizationIDValue == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"status": "unauthorized", "error": "invalid_organization_context"})
+		organizationIDValue, ok := shared.OrganizationIDFromContext(c)
+		if !ok {
 			return
 		}
 
 		organization, err := svc.Get(c.Request.Context(), organizationIDValue)
 		if err != nil {
-			handleServiceError(c, err)
+			shared.HandleServiceError(c, err, organizationErrorClassifier)
 			return
 		}
 
@@ -76,42 +74,24 @@ func Show(svc organizationservices.Service) gin.HandlerFunc {
 
 func Update(svc organizationservices.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		organizationID, exists := c.Get(middleware.GinKeyOrganizationID)
-		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{"status": "unauthorized", "error": "missing_organization_context"})
-			return
-		}
-
-		organizationIDValue, ok := organizationID.(string)
-		if !ok || organizationIDValue == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"status": "unauthorized", "error": "invalid_organization_context"})
+		organizationIDValue, ok := shared.OrganizationIDFromContext(c)
+		if !ok {
 			return
 		}
 
 		var req updateOrganizationRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error_code": "validation_error", "error_details": gin.H{"message": err.Error()}})
+			shared.RespondError(c, http.StatusBadRequest, "validation_error", gin.H{"message": err.Error()})
 			return
 		}
 
 		organization, err := svc.Update(c.Request.Context(), organizationIDValue, req.Organization)
 		if err != nil {
-			handleServiceError(c, err)
+			shared.HandleServiceError(c, err, organizationErrorClassifier)
 			return
 		}
 
 		c.JSON(http.StatusOK, showOrganizationEnvelope{Organization: toOrganizationResponse(organization)})
-	}
-}
-
-func handleServiceError(c *gin.Context, err error) {
-	switch {
-	case errors.Is(err, organizationservices.ErrOrganizationNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"status": "error", "error_code": "organization_not_found", "error_details": gin.H{}})
-	case organizationservices.IsValidationError(err):
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"status": "error", "error_code": "validation_error", "error_details": gin.H{"message": err.Error()}})
-	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "error_code": "internal_error", "error_details": gin.H{}})
 	}
 }
 

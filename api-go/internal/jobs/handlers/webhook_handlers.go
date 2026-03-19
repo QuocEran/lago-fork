@@ -126,7 +126,8 @@ func buildSendHTTPWebhookHandler(db *gorm.DB, signingSecret string, poster HTTPP
 			)
 			return fmt.Errorf("http post to %s: %w", *wh.Endpoint, postErr)
 		}
-		defer resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
 
 		httpStatus := resp.StatusCode
 		update["http_status"] = httpStatus

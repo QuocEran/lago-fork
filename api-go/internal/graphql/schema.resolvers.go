@@ -15,11 +15,11 @@ import (
 	"github.com/getlago/lago/api-go/internal/graphql/graphcontext"
 	"github.com/getlago/lago/api-go/internal/graphql/model"
 	"github.com/getlago/lago/api-go/internal/models"
-	bmsvc "github.com/getlago/lago/api-go/internal/services/billable_metrics"
+	bmsvc "github.com/getlago/lago/api-go/internal/services/billablemetrics"
 	invsvc "github.com/getlago/lago/api-go/internal/services/invoices"
 	plansvc "github.com/getlago/lago/api-go/internal/services/plans"
 	subsvc "github.com/getlago/lago/api-go/internal/services/subscriptions"
-	wesvc "github.com/getlago/lago/api-go/internal/services/webhook_endpoints"
+	wesvc "github.com/getlago/lago/api-go/internal/services/webhookendpoints"
 )
 
 // AiConversationStreamed is the resolver for the aiConversationStreamed field.
@@ -393,7 +393,7 @@ func (r *mutationResolver) CreateWebhookEndpoint(ctx context.Context, input mode
 		WebhookURL:    input.WebhookURL,
 		SignatureAlgo: toModelSignatureAlgo(input.SignatureAlgo),
 	}
-	ep, err := r.WebhookEndpointSvc.Create(orgID, params)
+	ep, err := r.WebhookEndpointSvc.Create(ctx, orgID, params)
 	if err != nil {
 		return nil, err
 	}
@@ -554,7 +554,7 @@ func (r *mutationResolver) DestroyWebhookEndpoint(ctx context.Context, input mod
 	if !ok {
 		return nil, fmt.Errorf("unauthorized")
 	}
-	ep, err := r.WebhookEndpointSvc.Delete(orgID, input.ID)
+	ep, err := r.WebhookEndpointSvc.Delete(ctx, orgID, input.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -1171,7 +1171,7 @@ func (r *mutationResolver) UpdateWebhookEndpoint(ctx context.Context, input mode
 		algo := toModelSignatureAlgo(input.SignatureAlgo)
 		params.SignatureAlgo = &algo
 	}
-	ep, err := r.WebhookEndpointSvc.Update(orgID, input.ID, params)
+	ep, err := r.WebhookEndpointSvc.Update(ctx, orgID, input.ID, params)
 	if err != nil {
 		return nil, err
 	}
@@ -1849,7 +1849,7 @@ func (r *queryResolver) WebhookEndpoint(ctx context.Context, id string) (*model.
 	if !ok {
 		return nil, fmt.Errorf("unauthorized")
 	}
-	ep, err := r.WebhookEndpointSvc.GetByID(orgID, id)
+	ep, err := r.WebhookEndpointSvc.GetByID(ctx, orgID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -1870,7 +1870,7 @@ func (r *queryResolver) WebhookEndpoints(ctx context.Context, limit *int, page *
 	if limit != nil {
 		pageLimit = *limit
 	}
-	eps, total, err := r.WebhookEndpointSvc.List(orgID, pageNum, pageLimit)
+	eps, total, err := r.WebhookEndpointSvc.List(ctx, orgID, pageNum, pageLimit)
 	if err != nil {
 		return nil, err
 	}

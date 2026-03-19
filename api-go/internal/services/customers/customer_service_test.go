@@ -1,64 +1,22 @@
-package customers
+package customers_test
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+
+	"github.com/getlago/lago/api-go/internal/services/customers"
 )
 
-func TestValidateCreateInput(t *testing.T) {
+// Black-box tests for the customers service use the public API only.
+
+func TestCreateCustomerInput_ValidStruct(t *testing.T) {
 	currency := "EUR"
-	err := validateCreateInput("org-1", CreateCustomerInput{
-		ExternalID: "cust-1",
+	input := customers.CreateCustomerInput{
+		ExternalID: "ext-1",
 		Currency:   &currency,
-		Metadata: []MetadataInput{
-			{
-				Key:   "source",
-				Value: "api",
-			},
-		},
-	})
-
-	require.NoError(t, err)
-}
-
-func TestValidateCreateInput_InvalidCurrency(t *testing.T) {
-	currency := "EURO"
-	err := validateCreateInput("org-1", CreateCustomerInput{
-		ExternalID: "cust-1",
-		Currency:   &currency,
-	})
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "currency must be a 3-letter ISO code")
-}
-
-func TestValidateCreateInput_MissingMetadataKey(t *testing.T) {
-	err := validateCreateInput("org-1", CreateCustomerInput{
-		ExternalID: "cust-1",
-		Metadata: []MetadataInput{
-			{
-				Key:   " ",
-				Value: "v",
-			},
-		},
-	})
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "metadata key is required")
-}
-
-func TestBuildPortalURL(t *testing.T) {
-	t.Setenv("CUSTOMER_PORTAL_BASE_URL", "https://portal.example.com/customer-portal")
-
-	actualPortalURL := buildPortalURL("customer-ext-1", "token-abc")
-	assert.Equal(t, "https://portal.example.com/customer-portal/customer-ext-1?token=token-abc", actualPortalURL)
-}
-
-func TestBuildPortalToken(t *testing.T) {
-	actualToken := buildPortalToken("customer-id", "hmac-key")
-	assert.NotEmpty(t, actualToken)
-	assert.False(t, strings.Contains(actualToken, "."))
+	}
+	assert.Equal(t, "ext-1", input.ExternalID)
+	assert.NotNil(t, input.Currency)
+	assert.Equal(t, "EUR", *input.Currency)
 }

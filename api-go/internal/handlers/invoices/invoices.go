@@ -6,10 +6,18 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/getlago/lago/api-go/internal/middleware"
+	"github.com/getlago/lago/api-go/internal/handlers/shared"
 	"github.com/getlago/lago/api-go/internal/models"
 	invoiceservices "github.com/getlago/lago/api-go/internal/services/invoices"
 )
+
+var invoiceErrorClassifier = shared.ServiceErrorClassifier{
+	IsNotFoundError:   invoiceservices.IsNotFoundError,
+	IsTransitionError: invoiceservices.IsTransitionError,
+	IsValidationErr:   invoiceservices.IsValidationError,
+	NotFoundCode:      "invoice_not_found",
+	TransitionCode:    "transition_error",
+}
 
 type createInvoiceRequestEnvelope struct {
 	Invoice invoiceservices.CreateInvoiceInput `json:"invoice" binding:"required"`
@@ -39,30 +47,30 @@ type invoiceResponse struct {
 
 func Create(svc invoiceservices.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		organizationID, ok := organizationIDFromContext(c)
+		organizationID, ok := shared.OrganizationIDFromContext(c)
 		if !ok {
 			return
 		}
 
 		var req createInvoiceRequestEnvelope
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error_code": "validation_error", "error_details": gin.H{"message": err.Error()}})
+			shared.RespondError(c, http.StatusBadRequest, "validation_error", gin.H{"message": err.Error()})
 			return
 		}
 
 		invoice, err := svc.Create(c.Request.Context(), organizationID, req.Invoice)
 		if err != nil {
-			handleServiceError(c, err)
+			shared.HandleServiceError(c, err, invoiceErrorClassifier)
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"invoice": toInvoiceResponse(invoice)})
+		shared.RespondJSON(c, http.StatusCreated, "invoice", toInvoiceResponse(invoice))
 	}
 }
 
 func Index(svc invoiceservices.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		organizationID, ok := organizationIDFromContext(c)
+		organizationID, ok := shared.OrganizationIDFromContext(c)
 		if !ok {
 			return
 		}
@@ -79,7 +87,7 @@ func Index(svc invoiceservices.Service) gin.HandlerFunc {
 
 		invoices, pagination, err := svc.List(c.Request.Context(), organizationID, filter)
 		if err != nil {
-			handleServiceError(c, err)
+			shared.HandleServiceError(c, err, invoiceErrorClassifier)
 			return
 		}
 
@@ -88,22 +96,19 @@ func Index(svc invoiceservices.Service) gin.HandlerFunc {
 			response = append(response, toInvoiceResponse(&invoices[i]))
 		}
 
-		c.JSON(http.StatusOK, gin.H{
-			"invoices": response,
-			"meta": gin.H{
-				"current_page": pagination.CurrentPage,
-				"next_page":    pagination.NextPage,
-				"prev_page":    pagination.PrevPage,
-				"total_pages":  pagination.TotalPages,
-				"total_count":  pagination.TotalCount,
-			},
+		shared.RespondList(c, "invoices", response, shared.PaginationMeta{
+			CurrentPage: pagination.CurrentPage,
+			NextPage:    pagination.NextPage,
+			PrevPage:    pagination.PrevPage,
+			TotalPages:  pagination.TotalPages,
+			TotalCount:  pagination.TotalCount,
 		})
 	}
 }
 
 func Show(svc invoiceservices.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		organizationID, ok := organizationIDFromContext(c)
+		organizationID, ok := shared.OrganizationIDFromContext(c)
 		if !ok {
 			return
 		}
@@ -111,7 +116,7 @@ func Show(svc invoiceservices.Service) gin.HandlerFunc {
 		id := c.Param("id")
 		invoice, err := svc.GetByID(c.Request.Context(), organizationID, id)
 		if err != nil {
-			handleServiceError(c, err)
+			shared.HandleServiceError(c, err, invoiceErrorClassifier)
 			return
 		}
 
@@ -121,7 +126,7 @@ func Show(svc invoiceservices.Service) gin.HandlerFunc {
 
 func Finalize(svc invoiceservices.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		organizationID, ok := organizationIDFromContext(c)
+		organizationID, ok := shared.OrganizationIDFromContext(c)
 		if !ok {
 			return
 		}
@@ -129,7 +134,7 @@ func Finalize(svc invoiceservices.Service) gin.HandlerFunc {
 		id := c.Param("id")
 		invoice, err := svc.Finalize(c.Request.Context(), organizationID, id)
 		if err != nil {
-			handleServiceError(c, err)
+			shared.HandleServiceError(c, err, invoiceErrorClassifier)
 			return
 		}
 
@@ -139,7 +144,7 @@ func Finalize(svc invoiceservices.Service) gin.HandlerFunc {
 
 func Void(svc invoiceservices.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		organizationID, ok := organizationIDFromContext(c)
+		organizationID, ok := shared.OrganizationIDFromContext(c)
 		if !ok {
 			return
 		}
@@ -147,40 +152,11 @@ func Void(svc invoiceservices.Service) gin.HandlerFunc {
 		id := c.Param("id")
 		invoice, err := svc.Void(c.Request.Context(), organizationID, id)
 		if err != nil {
-			handleServiceError(c, err)
+			shared.HandleServiceError(c, err, invoiceErrorClassifier)
 			return
 		}
 
 		c.JSON(http.StatusOK, gin.H{"invoice": toInvoiceResponse(invoice)})
-	}
-}
-
-func organizationIDFromContext(c *gin.Context) (string, bool) {
-	value, exists := c.Get(middleware.GinKeyOrganizationID)
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"status": "unauthorized", "error": "missing_organization_context"})
-		return "", false
-	}
-
-	organizationID, ok := value.(string)
-	if !ok || organizationID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"status": "unauthorized", "error": "invalid_organization_context"})
-		return "", false
-	}
-
-	return organizationID, true
-}
-
-func handleServiceError(c *gin.Context, err error) {
-	switch {
-	case invoiceservices.IsNotFoundError(err):
-		c.JSON(http.StatusNotFound, gin.H{"status": "error", "error_code": "invoice_not_found", "error_details": gin.H{}})
-	case invoiceservices.IsTransitionError(err):
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"status": "error", "error_code": "transition_error", "error_details": gin.H{"message": err.Error()}})
-	case invoiceservices.IsValidationError(err):
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"status": "error", "error_code": "validation_error", "error_details": gin.H{"message": err.Error()}})
-	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "error_code": "internal_error", "error_details": gin.H{}})
 	}
 }
 

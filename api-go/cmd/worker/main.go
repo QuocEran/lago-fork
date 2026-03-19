@@ -16,7 +16,7 @@ import (
 func main() {
 	cfg := config.Load()
 
-	redisOpt, err := jobs.ParseRedisConnOpt(cfg.RedisURL, cfg.RedisPassword, cfg.RedisDB)
+	redisOpt, err := jobs.ParseRedisConnOpt(cfg.Redis.URL, cfg.Redis.Password, cfg.Redis.DB)
 	if err != nil {
 		slog.Error("failed to parse redis config", slog.String("error", err.Error()))
 		os.Exit(1)

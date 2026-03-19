@@ -1,11 +1,6 @@
 package models
 
-import (
-	"database/sql/driver"
-	"encoding/json"
-	"fmt"
-	"time"
-)
+import "time"
 
 // FeeType maps to Rails integer enum for fee_type.
 type FeeType int
@@ -28,34 +23,6 @@ const (
 	FeePaymentStatusFailed    FeePaymentStatus = 2
 	FeePaymentStatusRefunded  FeePaymentStatus = 3
 )
-
-// JSONBObject is a jsonb map column.
-type JSONBObject map[string]any
-
-func (j JSONBObject) Value() (driver.Value, error) {
-	if j == nil {
-		return "{}", nil
-	}
-	b, err := json.Marshal(j)
-	return string(b), err
-}
-
-func (j *JSONBObject) Scan(value any) error {
-	if value == nil {
-		*j = JSONBObject{}
-		return nil
-	}
-	var bytes []byte
-	switch v := value.(type) {
-	case string:
-		bytes = []byte(v)
-	case []byte:
-		bytes = v
-	default:
-		return fmt.Errorf("unsupported type: %T", value)
-	}
-	return json.Unmarshal(bytes, j)
-}
 
 // Fee maps to the existing Rails `fees` table.
 type Fee struct {

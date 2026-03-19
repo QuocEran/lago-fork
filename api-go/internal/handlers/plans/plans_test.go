@@ -117,7 +117,7 @@ func TestCreate_Success(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	newTestRouter(svc).ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, http.StatusCreated, w.Code)
 	var resp map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	plan := resp["plan"].(map[string]any)

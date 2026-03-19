@@ -121,7 +121,7 @@ func TestCreateCustomerReturnsSuccess(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(response, request)
 
-	assert.Equal(t, http.StatusOK, response.Code)
+	assert.Equal(t, http.StatusCreated, response.Code)
 	assert.Contains(t, response.Body.String(), `"external_id":"cust-ext-1"`)
 	assert.Contains(t, response.Body.String(), `"metadata":[{"key":"tier","value":"gold","display_in_invoice":true}]`)
 }

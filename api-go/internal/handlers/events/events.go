@@ -7,10 +7,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/getlago/lago/api-go/internal/middleware"
+	"github.com/getlago/lago/api-go/internal/handlers/shared"
 	"github.com/getlago/lago/api-go/internal/models"
 	eventservices "github.com/getlago/lago/api-go/internal/services/events"
 )
+
+var eventErrorClassifier = shared.ServiceErrorClassifier{
+	IsValidationErr: eventservices.IsValidationError,
+}
 
 type eventRequest struct {
 	TransactionID          string         `json:"transaction_id"`
@@ -38,43 +42,43 @@ type eventResponse struct {
 
 func Create(svc eventservices.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		organizationID, ok := organizationIDFromContext(c)
+		organizationID, ok := shared.OrganizationIDFromContext(c)
 		if !ok {
 			return
 		}
 
 		var req ingestEventRequestEnvelope
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error_code": "validation_error", "error_details": gin.H{"message": err.Error()}})
+			shared.RespondError(c, http.StatusBadRequest, "validation_error", gin.H{"message": err.Error()})
 			return
 		}
 
 		input, err := toServiceInput(req.Event)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error_code": "validation_error", "error_details": gin.H{"message": err.Error()}})
+			shared.RespondError(c, http.StatusBadRequest, "validation_error", gin.H{"message": err.Error()})
 			return
 		}
 
 		ingested, err := svc.Ingest(c.Request.Context(), organizationID, input)
 		if err != nil {
-			handleServiceError(c, err)
+			shared.HandleServiceError(c, err, eventErrorClassifier)
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"event": toResponse(ingested)})
+		shared.RespondJSON(c, http.StatusCreated, "event", toResponse(ingested))
 	}
 }
 
 func CreateBatch(svc eventservices.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		organizationID, ok := organizationIDFromContext(c)
+		organizationID, ok := shared.OrganizationIDFromContext(c)
 		if !ok {
 			return
 		}
 
 		var req ingestBatchRequestEnvelope
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error_code": "validation_error", "error_details": gin.H{"message": err.Error()}})
+			shared.RespondError(c, http.StatusBadRequest, "validation_error", gin.H{"message": err.Error()})
 			return
 		}
 
@@ -82,7 +86,7 @@ func CreateBatch(svc eventservices.Service) gin.HandlerFunc {
 		for _, item := range req.Events {
 			input, err := toServiceInput(item)
 			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"status": "error", "error_code": "validation_error", "error_details": gin.H{"message": err.Error()}})
+				shared.RespondError(c, http.StatusBadRequest, "validation_error", gin.H{"message": err.Error()})
 				return
 			}
 			inputs = append(inputs, input)
@@ -90,7 +94,7 @@ func CreateBatch(svc eventservices.Service) gin.HandlerFunc {
 
 		results, err := svc.IngestBatch(c.Request.Context(), organizationID, inputs)
 		if err != nil {
-			handleServiceError(c, err)
+			shared.HandleServiceError(c, err, eventErrorClassifier)
 			return
 		}
 
@@ -100,24 +104,8 @@ func CreateBatch(svc eventservices.Service) gin.HandlerFunc {
 			responseItems = append(responseItems, toResponse(&copied))
 		}
 
-		c.JSON(http.StatusOK, gin.H{"events": responseItems})
+		shared.RespondJSON(c, http.StatusCreated, "events", responseItems)
 	}
-}
-
-func organizationIDFromContext(c *gin.Context) (string, bool) {
-	value, exists := c.Get(middleware.GinKeyOrganizationID)
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"status": "unauthorized", "error": "missing_organization_context"})
-		return "", false
-	}
-
-	organizationID, ok := value.(string)
-	if !ok || organizationID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"status": "unauthorized", "error": "invalid_organization_context"})
-		return "", false
-	}
-
-	return organizationID, true
 }
 
 func toServiceInput(input eventRequest) (eventservices.IngestEventInput, error) {
@@ -138,15 +126,6 @@ func toServiceInput(input eventRequest) (eventservices.IngestEventInput, error) 
 		ExternalCustomerID:     input.ExternalCustomerID,
 		ExternalSubscriptionID: input.ExternalSubscriptionID,
 	}, nil
-}
-
-func handleServiceError(c *gin.Context, err error) {
-	if eventservices.IsValidationError(err) {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"status": "error", "error_code": "validation_error", "error_details": gin.H{"message": err.Error()}})
-		return
-	}
-
-	c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "error_code": "internal_error", "error_details": gin.H{}})
 }
 
 func toResponse(result *eventservices.IngestedEvent) eventResponse {
@@ -171,18 +150,10 @@ type eventListItem struct {
 	CreatedAt               time.Time      `json:"created_at"`
 }
 
-type paginationMeta struct {
-	CurrentPage int  `json:"current_page"`
-	NextPage    *int `json:"next_page"`
-	PrevPage    *int `json:"prev_page"`
-	TotalPages  int  `json:"total_pages"`
-	TotalCount  int64 `json:"total_count"`
-}
-
 // List handles GET /api/v1/events.
 func List(svc eventservices.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		organizationID, ok := organizationIDFromContext(c)
+		organizationID, ok := shared.OrganizationIDFromContext(c)
 		if !ok {
 			return
 		}
@@ -191,7 +162,7 @@ func List(svc eventservices.Service) gin.HandlerFunc {
 
 		events, pagination, err := svc.List(c.Request.Context(), organizationID, filter)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "error_code": "internal_error", "error_details": gin.H{}})
+			shared.HandleServiceError(c, err, eventErrorClassifier)
 			return
 		}
 
@@ -201,15 +172,12 @@ func List(svc eventservices.Service) gin.HandlerFunc {
 			items = append(items, toListItem(&copied))
 		}
 
-		c.JSON(http.StatusOK, gin.H{
-			"events": items,
-			"meta": paginationMeta{
-				CurrentPage: pagination.CurrentPage,
-				NextPage:    pagination.NextPage,
-				PrevPage:    pagination.PrevPage,
-				TotalPages:  pagination.TotalPages,
-				TotalCount:  pagination.TotalCount,
-			},
+		shared.RespondList(c, "events", items, shared.PaginationMeta{
+			CurrentPage: pagination.CurrentPage,
+			NextPage:    pagination.NextPage,
+			PrevPage:    pagination.PrevPage,
+			TotalPages:  pagination.TotalPages,
+			TotalCount:  pagination.TotalCount,
 		})
 	}
 }
@@ -282,18 +250,14 @@ type estimateFeesEventInput struct {
 // This endpoint validates input and returns an empty fees list until then.
 func EstimateFees(_ eventservices.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		_, ok := organizationIDFromContext(c)
+		_, ok := shared.OrganizationIDFromContext(c)
 		if !ok {
 			return
 		}
 
 		var req estimateFeesRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"status":         "error",
-				"error_code":     "validation_error",
-				"error_details":  gin.H{"message": err.Error()},
-			})
+			shared.RespondError(c, http.StatusBadRequest, "validation_error", gin.H{"message": err.Error()})
 			return
 		}
 

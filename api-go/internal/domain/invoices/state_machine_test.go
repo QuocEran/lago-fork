@@ -7,71 +7,70 @@ import (
 	"github.com/stretchr/testify/require"
 
 	domain "github.com/getlago/lago/api-go/internal/domain/invoices"
-	"github.com/getlago/lago/api-go/internal/models"
 )
 
-func invoiceWithStatus(status models.InvoiceStatus) *models.Invoice {
-	return &models.Invoice{Status: status}
+func stateWithStatus(status domain.InvoiceStatus) *domain.InvoiceState {
+	return &domain.InvoiceState{Status: status}
 }
 
 func TestApplyFinalize_DraftToFinalized(t *testing.T) {
-	inputInvoice := invoiceWithStatus(models.InvoiceStatusDraft)
+	state := stateWithStatus(domain.InvoiceStatusDraft)
 
-	err := domain.ApplyFinalize(inputInvoice)
+	err := domain.ApplyFinalize(state)
 
 	require.NoError(t, err)
-	assert.Equal(t, models.InvoiceStatusFinalized, inputInvoice.Status)
-	assert.NotNil(t, inputInvoice.FinalizedAt)
+	assert.Equal(t, domain.InvoiceStatusFinalized, state.Status)
+	assert.NotNil(t, state.FinalizedAt)
 }
 
 func TestApplyFinalize_GeneratingToFinalized(t *testing.T) {
-	inputInvoice := invoiceWithStatus(models.InvoiceStatusGenerating)
+	state := stateWithStatus(domain.InvoiceStatusGenerating)
 
-	err := domain.ApplyFinalize(inputInvoice)
+	err := domain.ApplyFinalize(state)
 
 	require.NoError(t, err)
-	assert.Equal(t, models.InvoiceStatusFinalized, inputInvoice.Status)
-	assert.NotNil(t, inputInvoice.FinalizedAt)
+	assert.Equal(t, domain.InvoiceStatusFinalized, state.Status)
+	assert.NotNil(t, state.FinalizedAt)
 }
 
 func TestApplyFinalize_AlreadyFinalized(t *testing.T) {
-	inputInvoice := invoiceWithStatus(models.InvoiceStatusFinalized)
+	state := stateWithStatus(domain.InvoiceStatusFinalized)
 
-	actualErr := domain.ApplyFinalize(inputInvoice)
+	actualErr := domain.ApplyFinalize(state)
 
 	assert.ErrorIs(t, actualErr, domain.ErrAlreadyFinalized)
 }
 
 func TestApplyFinalize_AlreadyVoided(t *testing.T) {
-	inputInvoice := invoiceWithStatus(models.InvoiceStatusVoided)
+	state := stateWithStatus(domain.InvoiceStatusVoided)
 
-	actualErr := domain.ApplyFinalize(inputInvoice)
+	actualErr := domain.ApplyFinalize(state)
 
 	assert.ErrorIs(t, actualErr, domain.ErrAlreadyVoided)
 }
 
 func TestApplyVoid_FinalizedToVoided(t *testing.T) {
-	inputInvoice := invoiceWithStatus(models.InvoiceStatusFinalized)
+	state := stateWithStatus(domain.InvoiceStatusFinalized)
 
-	err := domain.ApplyVoid(inputInvoice)
+	err := domain.ApplyVoid(state)
 
 	require.NoError(t, err)
-	assert.Equal(t, models.InvoiceStatusVoided, inputInvoice.Status)
-	assert.NotNil(t, inputInvoice.VoidedAt)
+	assert.Equal(t, domain.InvoiceStatusVoided, state.Status)
+	assert.NotNil(t, state.VoidedAt)
 }
 
 func TestApplyVoid_DraftRejected(t *testing.T) {
-	inputInvoice := invoiceWithStatus(models.InvoiceStatusDraft)
+	state := stateWithStatus(domain.InvoiceStatusDraft)
 
-	actualErr := domain.ApplyVoid(inputInvoice)
+	actualErr := domain.ApplyVoid(state)
 
 	assert.ErrorIs(t, actualErr, domain.ErrCannotVoidDraft)
 }
 
 func TestApplyVoid_AlreadyVoided(t *testing.T) {
-	inputInvoice := invoiceWithStatus(models.InvoiceStatusVoided)
+	state := stateWithStatus(domain.InvoiceStatusVoided)
 
-	actualErr := domain.ApplyVoid(inputInvoice)
+	actualErr := domain.ApplyVoid(state)
 
 	assert.ErrorIs(t, actualErr, domain.ErrAlreadyVoided)
 }
