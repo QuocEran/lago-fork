@@ -57,4 +57,12 @@ graph TD
 
 ## Summary (post-implementation)
 
-_To be filled after completion._
+Implemented in a single commit (`67d60c6`):
+
+- **Migration** `000004_billable_metrics.up.sql`: `billable_metrics` + `billable_metric_filters` tables with indexes matching Rails schema parity.
+- **Models** (`models/billable_metric.go`): `BillableMetric` (with `AggregationType` int enum, soft-delete) and `BillableMetricFilter` (key/values array, soft-delete).
+- **Service** (`services/billable_metrics/`): Full CRUD with nested filter sync (soft-delete + recreate on update), pagination, search, and all validation rules.
+- **REST handlers** (`handlers/billable_metrics/`): POST/GET/PUT/DELETE for `/api/v1/billable_metrics[/:code]` wired in `server.go`.
+- **GraphQL resolvers**: `BillableMetric`, `BillableMetrics`, `CreateBillableMetric`, `UpdateBillableMetric`, `DestroyBillableMetric` — resolver struct now carries `BillableMetricSvc`.
+- **Tests**: 9 handler tests (mock service) + 11 service validation unit tests. All 16 test packages green.
+

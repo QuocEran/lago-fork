@@ -56,4 +56,6 @@ For EACH issue, identify and extract the following:
 
 ## Step 6: Handoff to Next Agent
 
-- Compact the session context and handoff to the next agent - continue implementation, review, or testing agent as appropriate.
+- Run `/compact` the session context and end the session
+- Include any relevant information or context in the handoff prompt.
+- Stop the session and ask me what next issue id to work on.

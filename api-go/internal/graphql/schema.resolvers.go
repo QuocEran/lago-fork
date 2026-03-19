@@ -8,12 +8,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/getlago/lago/api-go/internal/graphql/generated"
 	"github.com/getlago/lago/api-go/internal/graphql/graphcontext"
 	"github.com/getlago/lago/api-go/internal/graphql/model"
 	"github.com/getlago/lago/api-go/internal/models"
 	bmsvc "github.com/getlago/lago/api-go/internal/services/billable_metrics"
+	plansvc "github.com/getlago/lago/api-go/internal/services/plans"
 )
 
 // AiConversationStreamed is the resolver for the aiConversationStreamed field.
@@ -278,7 +280,36 @@ func (r *mutationResolver) CreatePaymentRequest(ctx context.Context, input model
 
 // CreatePlan is the resolver for the createPlan field.
 func (r *mutationResolver) CreatePlan(ctx context.Context, input model.CreatePlanInput) (*model.Plan, error) {
-	panic(fmt.Errorf("not implemented: CreatePlan - createPlan"))
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("unauthorized")
+	}
+
+	amountCents, err := strconv.ParseInt(input.AmountCents, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid amount_cents: %w", err)
+	}
+
+	chargeInputs := gqlChargeInputsToSvc(input.Charges)
+
+	plan, svcErr := r.PlanSvc.Create(ctx, orgID, plansvc.CreateInput{
+		Name:                    input.Name,
+		Code:                    input.Code,
+		Description:             input.Description,
+		Interval:                string(input.Interval),
+		AmountCents:             amountCents,
+		AmountCurrency:          string(input.AmountCurrency),
+		PayInAdvance:            input.PayInAdvance,
+		BillChargesMonthly:      input.BillChargesMonthly,
+		BillFixedChargesMonthly: input.BillFixedChargesMonthly,
+		TrialPeriod:             input.TrialPeriod,
+		InvoiceDisplayName:      input.InvoiceDisplayName,
+		Charges:                 chargeInputs,
+	})
+	if svcErr != nil {
+		return nil, toPlanGQLError(svcErr)
+	}
+	return toGQLPlan(plan), nil
 }
 
 // CreatePricingUnit is the resolver for the createPricingUnit field.
@@ -433,7 +464,20 @@ func (r *mutationResolver) DestroyPaymentProvider(ctx context.Context, input mod
 
 // DestroyPlan is the resolver for the destroyPlan field.
 func (r *mutationResolver) DestroyPlan(ctx context.Context, input model.DestroyPlanInput) (*model.DestroyPlanPayload, error) {
-	panic(fmt.Errorf("not implemented: DestroyPlan - destroyPlan"))
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("unauthorized")
+	}
+
+	plan, err := r.PlanSvc.GetByID(ctx, orgID, input.ID)
+	if err != nil {
+		return nil, toPlanGQLError(err)
+	}
+	deleted, err := r.PlanSvc.Delete(ctx, orgID, plan.Code)
+	if err != nil {
+		return nil, toPlanGQLError(err)
+	}
+	return &model.DestroyPlanPayload{ID: &deleted.ID}, nil
 }
 
 // DestroyRole is the resolver for the destroyRole field.
@@ -918,7 +962,41 @@ func (r *mutationResolver) UpdateOrganization(ctx context.Context, input model.U
 
 // UpdatePlan is the resolver for the updatePlan field.
 func (r *mutationResolver) UpdatePlan(ctx context.Context, input model.UpdatePlanInput) (*model.Plan, error) {
-	panic(fmt.Errorf("not implemented: UpdatePlan - updatePlan"))
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("unauthorized")
+	}
+
+	existing, err := r.PlanSvc.GetByID(ctx, orgID, input.ID)
+	if err != nil {
+		return nil, toPlanGQLError(err)
+	}
+
+	amountCents, err := strconv.ParseInt(input.AmountCents, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid amount_cents: %w", err)
+	}
+	currency := string(input.AmountCurrency)
+	interval := string(input.Interval)
+	chargeInputs := gqlChargeInputsToSvc(input.Charges)
+
+	plan, svcErr := r.PlanSvc.Update(ctx, orgID, existing.Code, plansvc.UpdateInput{
+		Name:                    &input.Name,
+		Description:             input.Description,
+		Interval:                &interval,
+		AmountCents:             &amountCents,
+		AmountCurrency:          &currency,
+		PayInAdvance:            &input.PayInAdvance,
+		BillChargesMonthly:      input.BillChargesMonthly,
+		BillFixedChargesMonthly: input.BillFixedChargesMonthly,
+		TrialPeriod:             input.TrialPeriod,
+		InvoiceDisplayName:      input.InvoiceDisplayName,
+		Charges:                 &chargeInputs,
+	})
+	if svcErr != nil {
+		return nil, toPlanGQLError(svcErr)
+	}
+	return toGQLPlan(plan), nil
 }
 
 // UpdatePricingUnit is the resolver for the updatePricingUnit field.
@@ -1454,12 +1532,57 @@ func (r *queryResolver) Payments(ctx context.Context, externalCustomerID *string
 
 // Plan is the resolver for the plan field.
 func (r *queryResolver) Plan(ctx context.Context, id string) (*model.Plan, error) {
-	panic(fmt.Errorf("not implemented: Plan - plan"))
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	plan, err := r.PlanSvc.GetByID(ctx, orgID, id)
+	if err != nil {
+		return nil, toPlanGQLError(err)
+	}
+	return toGQLPlan(plan), nil
 }
 
 // Plans is the resolver for the plans field.
 func (r *queryResolver) Plans(ctx context.Context, limit *int, page *int, searchTerm *string, withDeleted *bool) (*model.PlanCollection, error) {
-	panic(fmt.Errorf("not implemented: Plans - plans"))
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("unauthorized")
+	}
+
+	filter := plansvc.ListFilter{}
+	if page != nil {
+		filter.Page = *page
+	}
+	if limit != nil {
+		filter.PerPage = *limit
+	}
+	if searchTerm != nil {
+		filter.SearchTerm = *searchTerm
+	}
+	if withDeleted != nil {
+		filter.WithDeleted = *withDeleted
+	}
+
+	result, err := r.PlanSvc.List(ctx, orgID, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	collection := make([]*model.Plan, 0, len(result.Plans))
+	for i := range result.Plans {
+		collection = append(collection, toGQLPlan(&result.Plans[i]))
+	}
+
+	return &model.PlanCollection{
+		Collection: collection,
+		Metadata: &model.CollectionMetadata{
+			CurrentPage: result.CurrentPage,
+			TotalPages:  result.TotalPages,
+			TotalCount:  int(result.TotalCount),
+			LimitValue:  filter.PerPage,
+		},
+	}, nil
 }
 
 // PricingUnit is the resolver for the pricingUnit field.
@@ -1678,4 +1801,224 @@ func toBillableMetricGQLError(err error) error {
 		return fmt.Errorf("value_already_exist")
 	}
 	return err
+}
+
+// toGQLPlan converts a DB Plan to a GraphQL Plan model.
+func toGQLPlan(p *models.Plan) *model.Plan {
+charges := make([]*model.Charge, 0, len(p.Charges))
+for i := range p.Charges {
+charges = append(charges, toGQLCharge(&p.Charges[i]))
+}
+
+var deletedAt *string
+if p.DeletedAt.Valid {
+s := p.DeletedAt.Time.String()
+deletedAt = &s
+}
+
+return &model.Plan{
+ID:                      p.ID,
+Name:                    p.Name,
+Code:                    p.Code,
+Description:             p.Description,
+Interval:                model.PlanInterval(models.PlanIntervalToString(p.Interval)),
+AmountCents:             fmt.Sprintf("%d", p.AmountCents),
+AmountCurrency:          model.CurrencyEnum(p.AmountCurrency),
+PayInAdvance:            p.PayInAdvance,
+BillChargesMonthly:      p.BillChargesMonthly,
+BillFixedChargesMonthly: &p.BillFixedChargesMonthly,
+TrialPeriod:             p.TrialPeriod,
+InvoiceDisplayName:      p.InvoiceDisplayName,
+Charges:                 charges,
+ChargesCount:            len(charges),
+HasCharges:              len(charges) > 0,
+CreatedAt:               p.CreatedAt.String(),
+UpdatedAt:               p.UpdatedAt.String(),
+DeletedAt:               deletedAt,
+// Computed fields requiring subscription/customer data — defaults for Phase 6.
+ActiveSubscriptionsCount: 0,
+CustomersCount:           0,
+DraftInvoicesCount:       0,
+FixedChargesCount:        0,
+HasActiveSubscriptions:   false,
+HasCustomers:             false,
+HasDraftInvoices:         false,
+HasFixedCharges:          false,
+HasSubscriptions:         false,
+IsOverridden:             false,
+SubscriptionsCount:       0,
+}
+}
+
+// toGQLCharge converts a DB Charge to a GraphQL Charge model.
+func toGQLCharge(c *models.Charge) *model.Charge {
+chargeModel := model.ChargeModelEnum(models.ChargeModelToString(c.ChargeModel))
+code := c.Code
+
+var deletedAt *string
+if c.DeletedAt.Valid {
+s := c.DeletedAt.Time.String()
+deletedAt = &s
+}
+
+return &model.Charge{
+ID:                 c.ID,
+ChargeModel:        chargeModel,
+Code:               &code,
+InvoiceDisplayName: c.InvoiceDisplayName,
+Invoiceable:        c.Invoiceable,
+MinAmountCents:     fmt.Sprintf("%d", c.MinAmountCents),
+PayInAdvance:       c.PayInAdvance,
+Prorated:           c.Prorated,
+ParentID:           c.ParentID,
+CreatedAt:          c.CreatedAt.String(),
+UpdatedAt:          c.UpdatedAt.String(),
+DeletedAt:          deletedAt,
+}
+}
+
+// gqlChargeInputsToSvc converts GraphQL ChargeInput slice to service ChargeInput slice.
+func gqlChargeInputsToSvc(inputs []*model.ChargeInput) []plansvc.ChargeInput {
+out := make([]plansvc.ChargeInput, 0, len(inputs))
+for _, ci := range inputs {
+if ci == nil {
+continue
+}
+props := gqlPropertiesInputToMap(ci.Properties)
+filters := make([]plansvc.ChargeFilterInput, 0, len(ci.Filters))
+for _, f := range ci.Filters {
+if f == nil {
+continue
+}
+filterProps := gqlPropertiesInputToMap(f.Properties)
+filters = append(filters, plansvc.ChargeFilterInput{
+InvoiceDisplayName: f.InvoiceDisplayName,
+Properties:         filterProps,
+})
+}
+var minAmountCents *int64
+if ci.MinAmountCents != nil {
+v, err := strconv.ParseInt(*ci.MinAmountCents, 10, 64)
+if err == nil {
+minAmountCents = &v
+}
+}
+out = append(out, plansvc.ChargeInput{
+ID:                 ci.ID,
+BillableMetricID:   ci.BillableMetricID,
+ChargeModel:        string(ci.ChargeModel),
+Properties:         props,
+PayInAdvance:       ci.PayInAdvance,
+Invoiceable:        ci.Invoiceable,
+Prorated:           ci.Prorated,
+MinAmountCents:     minAmountCents,
+InvoiceDisplayName: ci.InvoiceDisplayName,
+Filters:            filters,
+})
+}
+return out
+}
+
+// gqlPropertiesInputToMap converts a GraphQL PropertiesInput to a generic map for JSONB storage.
+func gqlPropertiesInputToMap(p *model.PropertiesInput) map[string]any {
+if p == nil {
+return map[string]any{}
+}
+m := map[string]any{}
+if p.Amount != nil {
+m["amount"] = *p.Amount
+}
+if p.Rate != nil {
+m["rate"] = *p.Rate
+}
+if p.FixedAmount != nil {
+m["fixed_amount"] = *p.FixedAmount
+}
+if p.FreeUnits != nil {
+m["free_units"] = *p.FreeUnits
+}
+if p.FreeUnitsPerEvents != nil {
+m["free_units_per_events"] = *p.FreeUnitsPerEvents
+}
+if p.FreeUnitsPerTotalAggregation != nil {
+m["free_units_per_total_aggregation"] = *p.FreeUnitsPerTotalAggregation
+}
+if p.PackageSize != nil {
+m["package_size"] = *p.PackageSize
+}
+if p.PerTransactionMinAmount != nil {
+m["per_transaction_min_amount"] = *p.PerTransactionMinAmount
+}
+if p.PerTransactionMaxAmount != nil {
+m["per_transaction_max_amount"] = *p.PerTransactionMaxAmount
+}
+if len(p.PricingGroupKeys) > 0 {
+m["pricing_group_keys"] = p.PricingGroupKeys
+}
+if len(p.GraduatedRanges) > 0 {
+ranges := make([]map[string]any, 0, len(p.GraduatedRanges))
+for _, gr := range p.GraduatedRanges {
+if gr == nil {
+continue
+}
+r := map[string]any{
+"from_value":      gr.FromValue,
+"per_unit_amount": gr.PerUnitAmount,
+"flat_amount":     gr.FlatAmount,
+}
+if gr.ToValue != nil {
+r["to_value"] = *gr.ToValue
+}
+ranges = append(ranges, r)
+}
+m["graduated_ranges"] = ranges
+}
+if len(p.GraduatedPercentageRanges) > 0 {
+ranges := make([]map[string]any, 0, len(p.GraduatedPercentageRanges))
+for _, gr := range p.GraduatedPercentageRanges {
+if gr == nil {
+continue
+}
+r := map[string]any{
+"from_value":  gr.FromValue,
+"rate":        gr.Rate,
+"flat_amount": gr.FlatAmount,
+}
+if gr.ToValue != nil {
+r["to_value"] = *gr.ToValue
+}
+ranges = append(ranges, r)
+}
+m["graduated_percentage_ranges"] = ranges
+}
+if len(p.VolumeRanges) > 0 {
+ranges := make([]map[string]any, 0, len(p.VolumeRanges))
+for _, vr := range p.VolumeRanges {
+if vr == nil {
+continue
+}
+r := map[string]any{
+"from_value":      vr.FromValue,
+"per_unit_amount": vr.PerUnitAmount,
+"flat_amount":     vr.FlatAmount,
+}
+if vr.ToValue != nil {
+r["to_value"] = *vr.ToValue
+}
+ranges = append(ranges, r)
+}
+m["volume_ranges"] = ranges
+}
+return m
+}
+
+// toPlanGQLError converts a plan service error to a GraphQL error.
+func toPlanGQLError(err error) error {
+if errors.Is(err, plansvc.ErrPlanNotFound) {
+return fmt.Errorf("plan_not_found")
+}
+if errors.Is(err, plansvc.ErrPlanCodeConflict) {
+return fmt.Errorf("value_already_exist")
+}
+return err
 }

@@ -17,6 +17,7 @@ import (
 	eventhandlers "github.com/getlago/lago/api-go/internal/handlers/events"
 	invoicehandlers "github.com/getlago/lago/api-go/internal/handlers/invoices"
 	organizationhandlers "github.com/getlago/lago/api-go/internal/handlers/organizations"
+	planhandlers "github.com/getlago/lago/api-go/internal/handlers/plans"
 	kafkapkg "github.com/getlago/lago/api-go/internal/kafka"
 	"github.com/getlago/lago/api-go/internal/middleware"
 	bmservices "github.com/getlago/lago/api-go/internal/services/billable_metrics"
@@ -24,6 +25,7 @@ import (
 	eventservices "github.com/getlago/lago/api-go/internal/services/events"
 	invoiceservices "github.com/getlago/lago/api-go/internal/services/invoices"
 	organizationservices "github.com/getlago/lago/api-go/internal/services/organizations"
+	planservices "github.com/getlago/lago/api-go/internal/services/plans"
 	"github.com/getlago/lago/api-go/internal/services/users"
 )
 
@@ -49,9 +51,11 @@ func New(db *gorm.DB, sqlDB *sql.DB, version string, jwtSecret string, eventPubl
 	organizationSvc := organizationservices.NewService(db)
 	invoicesSvc := invoiceservices.NewService(db)
 	billableMetricsSvc := bmservices.NewService(db)
+	plansSvc := planservices.NewService(db)
 	graphQLServer := handler.NewDefaultServer(generated.NewExecutableSchema(generated.Config{
 		Resolvers: &graphql.Resolver{
 			BillableMetricSvc: billableMetricsSvc,
+			PlanSvc:           plansSvc,
 		},
 	}))
 
@@ -89,6 +93,12 @@ func New(db *gorm.DB, sqlDB *sql.DB, version string, jwtSecret string, eventPubl
 		v1.GET("/billable_metrics/:code", middleware.RequirePermission("billable_metric", "read"), bmhandlers.Show(billableMetricsSvc))
 		v1.PUT("/billable_metrics/:code", middleware.RequirePermission("billable_metric", "write"), bmhandlers.Update(billableMetricsSvc))
 		v1.DELETE("/billable_metrics/:code", middleware.RequirePermission("billable_metric", "write"), bmhandlers.Destroy(billableMetricsSvc))
+
+		v1.POST("/plans", middleware.RequirePermission("plan", "write"), planhandlers.Create(plansSvc))
+		v1.GET("/plans", middleware.RequirePermission("plan", "read"), planhandlers.Index(plansSvc))
+		v1.GET("/plans/:code", middleware.RequirePermission("plan", "read"), planhandlers.Show(plansSvc))
+		v1.PUT("/plans/:code", middleware.RequirePermission("plan", "write"), planhandlers.Update(plansSvc))
+		v1.DELETE("/plans/:code", middleware.RequirePermission("plan", "write"), planhandlers.Destroy(plansSvc))
 
 		// Phase 4+ routes registered here as each phase is implemented.
 	}

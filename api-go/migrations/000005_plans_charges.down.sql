@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS charge_filters;
+DROP TABLE IF EXISTS charges;
+DROP TABLE IF EXISTS plans;
