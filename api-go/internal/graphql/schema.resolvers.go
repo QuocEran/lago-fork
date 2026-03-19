@@ -16,6 +16,7 @@ import (
 	"github.com/getlago/lago/api-go/internal/graphql/model"
 	"github.com/getlago/lago/api-go/internal/models"
 	bmsvc "github.com/getlago/lago/api-go/internal/services/billable_metrics"
+	invsvc "github.com/getlago/lago/api-go/internal/services/invoices"
 	plansvc "github.com/getlago/lago/api-go/internal/services/plans"
 	subsvc "github.com/getlago/lago/api-go/internal/services/subscriptions"
 )
@@ -596,7 +597,15 @@ func (r *mutationResolver) FinalizeAllInvoices(ctx context.Context, input model.
 
 // FinalizeInvoice is the resolver for the finalizeInvoice field.
 func (r *mutationResolver) FinalizeInvoice(ctx context.Context, input model.FinalizeInvoiceInput) (*model.Invoice, error) {
-	panic(fmt.Errorf("not implemented: FinalizeInvoice - finalizeInvoice"))
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("missing organization context")
+	}
+	invoice, err := r.InvoiceSvc.Finalize(ctx, orgID, input.ID)
+	if err != nil {
+		return nil, toInvoiceGQLError(err)
+	}
+	return toGQLInvoice(invoice), nil
 }
 
 // GenerateCheckoutURL is the resolver for the generateCheckoutUrl field.
@@ -969,7 +978,17 @@ func (r *mutationResolver) UpdateInvite(ctx context.Context, input model.UpdateI
 
 // UpdateInvoice is the resolver for the updateInvoice field.
 func (r *mutationResolver) UpdateInvoice(ctx context.Context, input model.UpdateInvoiceInput) (*model.Invoice, error) {
-	panic(fmt.Errorf("not implemented: UpdateInvoice - updateInvoice"))
+	// UpdateInvoice in Rails primarily updates metadata fields (payment_status) or custom data.
+	// For Go parity this is a pass-through GetByID until full update fields are scoped.
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("missing organization context")
+	}
+	invoice, err := r.InvoiceSvc.GetByID(ctx, orgID, input.ID)
+	if err != nil {
+		return nil, toInvoiceGQLError(err)
+	}
+	return toGQLInvoice(invoice), nil
 }
 
 // UpdateInvoiceCustomSection is the resolver for the updateInvoiceCustomSection field.
@@ -1135,7 +1154,15 @@ func (r *mutationResolver) VoidCreditNote(ctx context.Context, input model.VoidC
 
 // VoidInvoice is the resolver for the voidInvoice field.
 func (r *mutationResolver) VoidInvoice(ctx context.Context, input model.VoidInvoiceInput) (*model.Invoice, error) {
-	panic(fmt.Errorf("not implemented: VoidInvoice - voidInvoice"))
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("missing organization context")
+	}
+	invoice, err := r.InvoiceSvc.Void(ctx, orgID, input.ID)
+	if err != nil {
+		return nil, toInvoiceGQLError(err)
+	}
+	return toGQLInvoice(invoice), nil
 }
 
 // ActivityLog is the resolver for the activityLog field.
@@ -1511,7 +1538,15 @@ func (r *queryResolver) Invites(ctx context.Context, limit *int, page *int) (*mo
 
 // Invoice is the resolver for the invoice field.
 func (r *queryResolver) Invoice(ctx context.Context, id string) (*model.Invoice, error) {
-	panic(fmt.Errorf("not implemented: Invoice - invoice"))
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("missing organization context")
+	}
+	invoice, err := r.InvoiceSvc.GetByID(ctx, orgID, id)
+	if err != nil {
+		return nil, toInvoiceGQLError(err)
+	}
+	return toGQLInvoice(invoice), nil
 }
 
 // InvoiceCollections is the resolver for the invoiceCollections field.
@@ -2219,6 +2254,140 @@ return fmt.Errorf("subscription_not_found")
 }
 if errors.Is(err, subsvc.ErrExternalIDConflict) {
 return fmt.Errorf("value_already_exist")
+}
+return err
+}
+
+// toGQLInvoice converts a DB Invoice to the minimal GraphQL Invoice type.
+func toGQLInvoice(inv *models.Invoice) *model.Invoice {
+if inv == nil {
+return nil
+}
+
+status := invoiceDBStatusToGQL(inv.Status)
+paymentStatus := invoicePaymentStatusToGQL(inv.PaymentStatus)
+invType := invoiceTypeToGQL(inv.InvoiceType)
+
+issuingDate := ""
+if inv.IssuingDate != nil {
+issuingDate = inv.IssuingDate.Format("2006-01-02")
+}
+paymentDueDate := ""
+if inv.PaymentDueDate != nil {
+paymentDueDate = inv.PaymentDueDate.Format("2006-01-02")
+}
+voidedAt := (*string)(nil)
+if inv.VoidedAt != nil {
+s := inv.VoidedAt.Format(time.RFC3339)
+voidedAt = &s
+}
+finalizedAt := ""
+if inv.FinalizedAt != nil {
+finalizedAt = inv.FinalizedAt.Format(time.RFC3339)
+}
+
+seqID := ""
+if inv.SequentialID != nil {
+seqID = fmt.Sprintf("%d", *inv.SequentialID)
+}
+
+var currency *model.CurrencyEnum
+if inv.Currency != "" {
+c := model.CurrencyEnum(inv.Currency)
+currency = &c
+}
+
+return &model.Invoice{
+ID:                                  inv.ID,
+Number:                              inv.Number,
+Status:                              status,
+PaymentStatus:                       paymentStatus,
+InvoiceType:                         invType,
+Currency:                            currency,
+SequentialID:                        seqID,
+IssuingDate:                         issuingDate,
+PaymentDueDate:                      paymentDueDate,
+CreatedAt:                           inv.CreatedAt.Format(time.RFC3339),
+UpdatedAt:                           inv.UpdatedAt.Format(time.RFC3339),
+VoidedAt:                            voidedAt,
+FeesAmountCents:                     fmt.Sprintf("%d", inv.FeesAmountCents),
+TaxesAmountCents:                    fmt.Sprintf("%d", inv.TaxesAmountCents),
+CouponsAmountCents:                  fmt.Sprintf("%d", inv.CouponsAmountCents),
+CreditNotesAmountCents:              fmt.Sprintf("%d", inv.CreditNotesAmountCents),
+PrepaidCreditAmountCents:            fmt.Sprintf("%d", inv.PrepaidCreditAmountCents),
+SubTotalExcludingTaxesAmountCents:   fmt.Sprintf("%d", inv.SubTotalExcludingTaxesCents),
+SubTotalIncludingTaxesAmountCents:   fmt.Sprintf("%d", inv.SubTotalIncludingTaxesCents),
+TotalAmountCents:                    fmt.Sprintf("%d", inv.TotalAmountCents),
+TaxesRate:                           inv.TaxesRate,
+VersionNumber:                       inv.VersionNumber,
+ReadyForPaymentProcessing:           inv.ReadyForPaymentProcessing,
+PaymentOverdue:                      inv.PaymentOverdue,
+SelfBilled:                          inv.SelfBilled,
+ExpectedFinalizationDate:            finalizedAt,
+ChargeAmountCents:                   fmt.Sprintf("%d", inv.FeesAmountCents),
+AvailableToCreditAmountCents:        "0",
+CreditableAmountCents:               "0",
+OffsettableAmountCents:              "0",
+RefundableAmountCents:               "0",
+ProgressiveBillingCreditAmountCents: "0",
+TotalDueAmountCents:                 fmt.Sprintf("%d", inv.TotalAmountCents),
+TotalPaidAmountCents:                "0",
+TotalSettledAmountCents:             "0",
+PayableType:                         "Invoice",
+Voidable:                            inv.Status == models.InvoiceStatusFinalized,
+}
+}
+
+func invoiceDBStatusToGQL(s models.InvoiceStatus) model.InvoiceStatusTypeEnum {
+switch s {
+case models.InvoiceStatusDraft:
+return model.InvoiceStatusTypeEnumDraft
+case models.InvoiceStatusFinalized:
+return model.InvoiceStatusTypeEnumFinalized
+case models.InvoiceStatusVoided:
+return model.InvoiceStatusTypeEnumVoided
+case models.InvoiceStatusGenerating:
+return model.InvoiceStatusTypeEnumGenerating
+default:
+return model.InvoiceStatusTypeEnumFailed
+}
+}
+
+func invoicePaymentStatusToGQL(ps models.InvoicePaymentStatus) model.InvoicePaymentStatusTypeEnum {
+switch ps {
+case models.InvoicePaymentStatusSucceeded:
+return model.InvoicePaymentStatusTypeEnumSucceeded
+case models.InvoicePaymentStatusFailed:
+return model.InvoicePaymentStatusTypeEnumFailed
+default:
+return model.InvoicePaymentStatusTypeEnumPending
+}
+}
+
+func invoiceTypeToGQL(t models.InvoiceType) model.InvoiceTypeEnum {
+switch t {
+case models.InvoiceTypeAddOn:
+return model.InvoiceTypeEnumAddOn
+case models.InvoiceTypeCredit:
+return model.InvoiceTypeEnumCredit
+case models.InvoiceTypeOneOff:
+return model.InvoiceTypeEnumOneOff
+case models.InvoiceTypeAdvanceCharges:
+return model.InvoiceTypeEnumAdvanceCharges
+case models.InvoiceTypeProgressiveBilling:
+return model.InvoiceTypeEnumProgressiveBilling
+default:
+return model.InvoiceTypeEnumSubscription
+}
+}
+
+// toInvoiceGQLError converts an invoice service error to a GQL-safe error.
+func toInvoiceGQLError(err error) error {
+if errors.Is(err, invsvc.ErrInvoiceNotFound) {
+return fmt.Errorf("invoice_not_found")
+}
+if invsvc.IsTransitionError(err) {
+return fmt.Errorf("transition_not_allowed")
 }
 return err
 }

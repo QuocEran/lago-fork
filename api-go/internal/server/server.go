@@ -58,6 +58,7 @@ func New(db *gorm.DB, sqlDB *sql.DB, version string, jwtSecret string, eventPubl
 	graphQLServer := handler.NewDefaultServer(generated.NewExecutableSchema(generated.Config{
 		Resolvers: &graphql.Resolver{
 			BillableMetricSvc: billableMetricsSvc,
+			InvoiceSvc:        invoicesSvc,
 			PlanSvc:           plansSvc,
 			SubscriptionSvc:   subscriptionsSvc,
 		},

@@ -159,6 +159,13 @@ func TestFinalizeInvoice_Success(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "invoices"`)).
 		WillReturnRows(fetchRows)
 	mock.ExpectBegin()
+	// computeAndApplyTotals: load fees
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "fees"`)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "amount_cents", "taxes_rate", "organization_id", "billing_entity_id"}).
+			AddRow("fee-1", int64(5000), 0.0, "org-1", "billing-1"))
+	// assignSequentialNumber: MAX(org_sequential_id)
+	mock.ExpectQuery(`SELECT COALESCE`).
+		WillReturnRows(sqlmock.NewRows([]string{"coalesce"}).AddRow(0))
 	mock.ExpectExec(`UPDATE "invoices"`).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()

@@ -3,7 +3,9 @@ package invoices
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -184,7 +186,19 @@ func (s *service) Finalize(ctx context.Context, organizationID string, id string
 		return nil, err
 	}
 
-	if err := s.db.WithContext(ctx).Save(invoice).Error; err != nil {
+	// Compute totals from associated fees in a transaction.
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := computeAndApplyTotals(ctx, tx, invoice); err != nil {
+			return err
+		}
+
+		if err := assignSequentialNumber(ctx, tx, invoice); err != nil {
+			return err
+		}
+
+		return tx.Save(invoice).Error
+	})
+	if err != nil {
 		return nil, err
 	}
 
@@ -292,4 +306,68 @@ func buildPagination(page, perPage int, totalCount int64) *Pagination {
 	}
 
 	return p
+}
+
+// computeAndApplyTotals loads fees for the invoice from DB, computes totals, and writes them onto the invoice.
+func computeAndApplyTotals(ctx context.Context, db *gorm.DB, invoice *models.Invoice) error {
+	var fees []models.Fee
+	if err := db.WithContext(ctx).
+		Where("invoice_id = ? AND deleted_at IS NULL", invoice.ID).
+		Find(&fees).Error; err != nil {
+		return err
+	}
+
+	feeAmounts := make([]int64, len(fees))
+	for i, f := range fees {
+		feeAmounts[i] = f.AmountCents
+	}
+
+	result := domain.CalculateTotals(domain.TotalsInput{
+		Fees:                          feeAmounts,
+		CouponsAmountCents:            invoice.CouponsAmountCents,
+		ProgressiveBillingCreditCents: 0, // populated by billing jobs — preserved as-is
+		CreditNotesAmountCents:        invoice.CreditNotesAmountCents,
+		TaxesRate:                     invoice.TaxesRate,
+	})
+
+	invoice.FeesAmountCents = result.FeesAmountCents
+	invoice.TaxesAmountCents = result.TaxesAmountCents
+	invoice.SubTotalExcludingTaxesCents = result.SubTotalExcludingTaxesCents
+	invoice.SubTotalIncludingTaxesCents = result.SubTotalIncludingTaxesCents
+	invoice.TotalAmountCents = result.TotalAmountCents
+	return nil
+}
+
+// assignSequentialNumber assigns organization_sequential_id and formats the invoice number.
+// The sequential ID is the current max + 1 within a DB transaction (advisory lock is a TODO for production).
+func assignSequentialNumber(ctx context.Context, db *gorm.DB, invoice *models.Invoice) error {
+	if invoice.OrgSequentialID != 0 {
+		// Already numbered (e.g. re-finalize guard).
+		return nil
+	}
+
+	var maxSeq int
+	if err := db.WithContext(ctx).
+		Model(&models.Invoice{}).
+		Where("organization_id = ? AND status = ? AND id != ?",
+			invoice.OrganizationID, models.InvoiceStatusFinalized, invoice.ID).
+		Select("COALESCE(MAX(organization_sequential_id), 0)").
+		Scan(&maxSeq).Error; err != nil {
+		return err
+	}
+
+	invoice.OrgSequentialID = maxSeq + 1
+
+	now := time.Now().UTC()
+	yearMonth := now.Format("200601")
+	invoice.Number = fmt.Sprintf("LAGO-%s-%03d", yearMonth, invoice.OrgSequentialID)
+
+	today := now.Truncate(24 * time.Hour)
+	invoice.IssuingDate = &today
+	if invoice.PaymentDueDate == nil {
+		dueDate := today.AddDate(0, 0, invoice.NetPaymentTerm)
+		invoice.PaymentDueDate = &dueDate
+	}
+
+	return nil
 }
