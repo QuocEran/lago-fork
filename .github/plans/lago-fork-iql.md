@@ -133,4 +133,34 @@ T7 (last)
 
 ## Implementation Summary
 
-*(To be filled after completion)*
+**Completed**: 2026-03-19 | Commit: `0a392bb`
+
+### lago-fork-ob2: Plans and Charges CRUD ✅
+
+| Deliverable | Status |
+|---|---|
+| Migration `000005_plans_charges` | ✅ plans, charges, charge_filters tables |
+| GORM models: Plan, Charge, ChargeFilter | ✅ with soft-delete, enums |
+| Plan service (Create/List/GetByCode/GetByID/Update/Delete) | ✅ with charge sync |
+| REST handlers: 5 endpoints on `/api/v1/plans` | ✅ |
+| GraphQL: createPlan, updatePlan, destroyPlan, plan, plans | ✅ |
+| Handler tests | ✅ 7 test cases |
+
+### lago-fork-yjt: Eight Charge Model Strategies ✅
+
+| Strategy | Algorithm |
+|---|---|
+| standard | units × amount |
+| graduated | tiered per-unit + flat fee |
+| package | ceil(paid_units / size) × package_price |
+| percentage | rate% on paid_units + optional fixed fee |
+| volume | all units at matched tier price |
+| graduated_percentage | tiered rate% + flat fee |
+| custom | passthrough externally-computed amount |
+| dynamic | units × per-event amount |
+
+- `shopspring/decimal` added for precision
+- Factory `New(chargeModel string)` with error on unknown models
+- Parity unit tests: 30+ cases across all 8 strategies — all pass
+
+### All 28 test packages pass
