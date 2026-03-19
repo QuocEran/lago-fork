@@ -2,6 +2,7 @@ package server
 
 import (
 	"database/sql"
+	"os"
 
 	"github.com/99designs/gqlgen/graphql/handler"
 	"github.com/gin-contrib/cors"
@@ -19,6 +20,8 @@ import (
 	organizationhandlers "github.com/getlago/lago/api-go/internal/handlers/organizations"
 	planhandlers "github.com/getlago/lago/api-go/internal/handlers/plans"
 	subhandlers "github.com/getlago/lago/api-go/internal/handlers/subscriptions"
+	wehandlers "github.com/getlago/lago/api-go/internal/handlers/webhook_endpoints"
+	webhookhandlers "github.com/getlago/lago/api-go/internal/handlers/webhooks"
 	kafkapkg "github.com/getlago/lago/api-go/internal/kafka"
 	"github.com/getlago/lago/api-go/internal/middleware"
 	bmservices "github.com/getlago/lago/api-go/internal/services/billable_metrics"
@@ -29,6 +32,7 @@ import (
 	planservices "github.com/getlago/lago/api-go/internal/services/plans"
 	subservices "github.com/getlago/lago/api-go/internal/services/subscriptions"
 	"github.com/getlago/lago/api-go/internal/services/users"
+	wesvc "github.com/getlago/lago/api-go/internal/services/webhook_endpoints"
 )
 
 func New(db *gorm.DB, sqlDB *sql.DB, version string, jwtSecret string, eventPublisher kafkapkg.EventPublisher) *gin.Engine {
@@ -55,12 +59,15 @@ func New(db *gorm.DB, sqlDB *sql.DB, version string, jwtSecret string, eventPubl
 	billableMetricsSvc := bmservices.NewService(db)
 	plansSvc := planservices.NewService(db)
 	subscriptionsSvc := subservices.NewService(db)
+	webhookEndpointsSvc := wesvc.NewService(db)
+
 	graphQLServer := handler.NewDefaultServer(generated.NewExecutableSchema(generated.Config{
 		Resolvers: &graphql.Resolver{
-			BillableMetricSvc: billableMetricsSvc,
-			InvoiceSvc:        invoicesSvc,
-			PlanSvc:           plansSvc,
-			SubscriptionSvc:   subscriptionsSvc,
+			BillableMetricSvc:   billableMetricsSvc,
+			InvoiceSvc:          invoicesSvc,
+			PlanSvc:             plansSvc,
+			SubscriptionSvc:     subscriptionsSvc,
+			WebhookEndpointSvc:  webhookEndpointsSvc,
 		},
 	}))
 
@@ -72,6 +79,11 @@ func New(db *gorm.DB, sqlDB *sql.DB, version string, jwtSecret string, eventPubl
 		middleware.GraphQLDataLoaders(db),
 		gin.WrapH(graphQLServer),
 	)
+
+	// Inbound webhook routes — no API key auth, provider-specific signature validation.
+	stripeSecret := os.Getenv("STRIPE_WEBHOOK_SECRET")
+	r.POST("/webhooks/stripe/:organization_id", webhookhandlers.StripeWebhook(db, stripeSecret))
+	r.POST("/webhooks/gocardless/:organization_id", webhookhandlers.GocardlessWebhook(db))
 
 	v1 := r.Group("/api/v1")
 	v1.Use(middleware.APIKeyAuth(db))
@@ -112,8 +124,19 @@ func New(db *gorm.DB, sqlDB *sql.DB, version string, jwtSecret string, eventPubl
 		v1.DELETE("/subscriptions/:external_id", middleware.RequirePermission("subscription", "write"), subhandlers.Terminate(subscriptionsSvc))
 		v1.GET("/customers/:external_id/current_usage", middleware.RequirePermission("customer", "read"), subhandlers.CurrentUsage())
 
-		// Phase 4+ routes registered here as each phase is implemented.
+		// Webhook endpoints CRUD.
+		v1.POST("/webhook_endpoints", middleware.RequirePermission("webhook_endpoint", "write"), wehandlers.Create(webhookEndpointsSvc))
+		v1.GET("/webhook_endpoints", middleware.RequirePermission("webhook_endpoint", "read"), wehandlers.Index(webhookEndpointsSvc))
+		v1.GET("/webhook_endpoints/event_types", middleware.RequirePermission("webhook_endpoint", "read"), wehandlers.EventTypes())
+		v1.GET("/webhook_endpoints/:id", middleware.RequirePermission("webhook_endpoint", "read"), wehandlers.Show(webhookEndpointsSvc))
+		v1.PUT("/webhook_endpoints/:id", middleware.RequirePermission("webhook_endpoint", "write"), wehandlers.Update(webhookEndpointsSvc))
+		v1.DELETE("/webhook_endpoints/:id", middleware.RequirePermission("webhook_endpoint", "write"), wehandlers.Destroy(webhookEndpointsSvc))
+
+		// Outbound webhook listing.
+		v1.GET("/webhooks", middleware.RequirePermission("webhook", "read"), webhookhandlers.Index(db))
+		v1.GET("/webhooks/:id", middleware.RequirePermission("webhook", "read"), webhookhandlers.Show(db))
 	}
 
 	return r
 }
+

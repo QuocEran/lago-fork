@@ -19,6 +19,7 @@ import (
 	invsvc "github.com/getlago/lago/api-go/internal/services/invoices"
 	plansvc "github.com/getlago/lago/api-go/internal/services/plans"
 	subsvc "github.com/getlago/lago/api-go/internal/services/subscriptions"
+	wesvc "github.com/getlago/lago/api-go/internal/services/webhook_endpoints"
 )
 
 // AiConversationStreamed is the resolver for the aiConversationStreamed field.
@@ -384,7 +385,19 @@ func (r *mutationResolver) CreateTax(ctx context.Context, input model.TaxCreateI
 
 // CreateWebhookEndpoint is the resolver for the createWebhookEndpoint field.
 func (r *mutationResolver) CreateWebhookEndpoint(ctx context.Context, input model.WebhookEndpointCreateInput) (*model.WebhookEndpoint, error) {
-	panic(fmt.Errorf("not implemented: CreateWebhookEndpoint - createWebhookEndpoint"))
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	params := wesvc.CreateParams{
+		WebhookURL:    input.WebhookURL,
+		SignatureAlgo: toModelSignatureAlgo(input.SignatureAlgo),
+	}
+	ep, err := r.WebhookEndpointSvc.Create(orgID, params)
+	if err != nil {
+		return nil, err
+	}
+	return toGQLWebhookEndpoint(ep), nil
 }
 
 // CreateXeroIntegration is the resolver for the createXeroIntegration field.
@@ -537,7 +550,15 @@ func (r *mutationResolver) DestroyTax(ctx context.Context, input model.DestroyTa
 
 // DestroyWebhookEndpoint is the resolver for the destroyWebhookEndpoint field.
 func (r *mutationResolver) DestroyWebhookEndpoint(ctx context.Context, input model.DestroyWebhookEndpointInput) (*model.DestroyWebhookEndpointPayload, error) {
-	panic(fmt.Errorf("not implemented: DestroyWebhookEndpoint - destroyWebhookEndpoint"))
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	ep, err := r.WebhookEndpointSvc.Delete(orgID, input.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &model.DestroyWebhookEndpointPayload{ID: &ep.ID}, nil
 }
 
 // DownloadCreditNote is the resolver for the downloadCreditNote field.
@@ -1139,7 +1160,22 @@ func (r *mutationResolver) UpdateTax(ctx context.Context, input model.TaxUpdateI
 
 // UpdateWebhookEndpoint is the resolver for the updateWebhookEndpoint field.
 func (r *mutationResolver) UpdateWebhookEndpoint(ctx context.Context, input model.WebhookEndpointUpdateInput) (*model.WebhookEndpoint, error) {
-	panic(fmt.Errorf("not implemented: UpdateWebhookEndpoint - updateWebhookEndpoint"))
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	params := wesvc.UpdateParams{
+		WebhookURL: &input.WebhookURL,
+	}
+	if input.SignatureAlgo != nil {
+		algo := toModelSignatureAlgo(input.SignatureAlgo)
+		params.SignatureAlgo = &algo
+	}
+	ep, err := r.WebhookEndpointSvc.Update(orgID, input.ID, params)
+	if err != nil {
+		return nil, err
+	}
+	return toGQLWebhookEndpoint(ep), nil
 }
 
 // UpdateXeroIntegration is the resolver for the updateXeroIntegration field.
@@ -1809,12 +1845,48 @@ func (r *queryResolver) Webhook(ctx context.Context, id string) (*model.Webhook,
 
 // WebhookEndpoint is the resolver for the webhookEndpoint field.
 func (r *queryResolver) WebhookEndpoint(ctx context.Context, id string) (*model.WebhookEndpoint, error) {
-	panic(fmt.Errorf("not implemented: WebhookEndpoint - webhookEndpoint"))
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	ep, err := r.WebhookEndpointSvc.GetByID(orgID, id)
+	if err != nil {
+		return nil, err
+	}
+	return toGQLWebhookEndpoint(ep), nil
 }
 
 // WebhookEndpoints is the resolver for the webhookEndpoints field.
 func (r *queryResolver) WebhookEndpoints(ctx context.Context, limit *int, page *int, searchTerm *string) (*model.WebhookEndpointCollection, error) {
-	panic(fmt.Errorf("not implemented: WebhookEndpoints - webhookEndpoints"))
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	pageNum := 1
+	if page != nil {
+		pageNum = *page
+	}
+	pageLimit := 20
+	if limit != nil {
+		pageLimit = *limit
+	}
+	eps, total, err := r.WebhookEndpointSvc.List(orgID, pageNum, pageLimit)
+	if err != nil {
+		return nil, err
+	}
+	gqlEps := make([]*model.WebhookEndpoint, len(eps))
+	for i := range eps {
+		gqlEps[i] = toGQLWebhookEndpoint(&eps[i])
+	}
+	totalPages := int(total+int64(pageLimit)-1) / pageLimit
+	return &model.WebhookEndpointCollection{
+		Collection: gqlEps,
+		Metadata: &model.CollectionMetadata{
+			CurrentPage: pageNum,
+			TotalCount:  int(total),
+			TotalPages:  totalPages,
+		},
+	}, nil
 }
 
 // Webhooks is the resolver for the webhooks field.
@@ -1927,269 +1999,269 @@ func toBillableMetricGQLError(err error) error {
 
 // toGQLPlan converts a DB Plan to a GraphQL Plan model.
 func toGQLPlan(p *models.Plan) *model.Plan {
-charges := make([]*model.Charge, 0, len(p.Charges))
-for i := range p.Charges {
-charges = append(charges, toGQLCharge(&p.Charges[i]))
-}
+	charges := make([]*model.Charge, 0, len(p.Charges))
+	for i := range p.Charges {
+		charges = append(charges, toGQLCharge(&p.Charges[i]))
+	}
 
-var deletedAt *string
-if p.DeletedAt.Valid {
-s := p.DeletedAt.Time.String()
-deletedAt = &s
-}
+	var deletedAt *string
+	if p.DeletedAt.Valid {
+		s := p.DeletedAt.Time.String()
+		deletedAt = &s
+	}
 
-return &model.Plan{
-ID:                      p.ID,
-Name:                    p.Name,
-Code:                    p.Code,
-Description:             p.Description,
-Interval:                model.PlanInterval(models.PlanIntervalToString(p.Interval)),
-AmountCents:             fmt.Sprintf("%d", p.AmountCents),
-AmountCurrency:          model.CurrencyEnum(p.AmountCurrency),
-PayInAdvance:            p.PayInAdvance,
-BillChargesMonthly:      p.BillChargesMonthly,
-BillFixedChargesMonthly: &p.BillFixedChargesMonthly,
-TrialPeriod:             p.TrialPeriod,
-InvoiceDisplayName:      p.InvoiceDisplayName,
-Charges:                 charges,
-ChargesCount:            len(charges),
-HasCharges:              len(charges) > 0,
-CreatedAt:               p.CreatedAt.String(),
-UpdatedAt:               p.UpdatedAt.String(),
-DeletedAt:               deletedAt,
-// Computed fields requiring subscription/customer data — defaults for Phase 6.
-ActiveSubscriptionsCount: 0,
-CustomersCount:           0,
-DraftInvoicesCount:       0,
-FixedChargesCount:        0,
-HasActiveSubscriptions:   false,
-HasCustomers:             false,
-HasDraftInvoices:         false,
-HasFixedCharges:          false,
-HasSubscriptions:         false,
-IsOverridden:             false,
-SubscriptionsCount:       0,
-}
+	return &model.Plan{
+		ID:                      p.ID,
+		Name:                    p.Name,
+		Code:                    p.Code,
+		Description:             p.Description,
+		Interval:                model.PlanInterval(models.PlanIntervalToString(p.Interval)),
+		AmountCents:             fmt.Sprintf("%d", p.AmountCents),
+		AmountCurrency:          model.CurrencyEnum(p.AmountCurrency),
+		PayInAdvance:            p.PayInAdvance,
+		BillChargesMonthly:      p.BillChargesMonthly,
+		BillFixedChargesMonthly: &p.BillFixedChargesMonthly,
+		TrialPeriod:             p.TrialPeriod,
+		InvoiceDisplayName:      p.InvoiceDisplayName,
+		Charges:                 charges,
+		ChargesCount:            len(charges),
+		HasCharges:              len(charges) > 0,
+		CreatedAt:               p.CreatedAt.String(),
+		UpdatedAt:               p.UpdatedAt.String(),
+		DeletedAt:               deletedAt,
+		// Computed fields requiring subscription/customer data — defaults for Phase 6.
+		ActiveSubscriptionsCount: 0,
+		CustomersCount:           0,
+		DraftInvoicesCount:       0,
+		FixedChargesCount:        0,
+		HasActiveSubscriptions:   false,
+		HasCustomers:             false,
+		HasDraftInvoices:         false,
+		HasFixedCharges:          false,
+		HasSubscriptions:         false,
+		IsOverridden:             false,
+		SubscriptionsCount:       0,
+	}
 }
 
 // toGQLCharge converts a DB Charge to a GraphQL Charge model.
 func toGQLCharge(c *models.Charge) *model.Charge {
-chargeModel := model.ChargeModelEnum(models.ChargeModelToString(c.ChargeModel))
-code := c.Code
+	chargeModel := model.ChargeModelEnum(models.ChargeModelToString(c.ChargeModel))
+	code := c.Code
 
-var deletedAt *string
-if c.DeletedAt.Valid {
-s := c.DeletedAt.Time.String()
-deletedAt = &s
-}
+	var deletedAt *string
+	if c.DeletedAt.Valid {
+		s := c.DeletedAt.Time.String()
+		deletedAt = &s
+	}
 
-return &model.Charge{
-ID:                 c.ID,
-ChargeModel:        chargeModel,
-Code:               &code,
-InvoiceDisplayName: c.InvoiceDisplayName,
-Invoiceable:        c.Invoiceable,
-MinAmountCents:     fmt.Sprintf("%d", c.MinAmountCents),
-PayInAdvance:       c.PayInAdvance,
-Prorated:           c.Prorated,
-ParentID:           c.ParentID,
-CreatedAt:          c.CreatedAt.String(),
-UpdatedAt:          c.UpdatedAt.String(),
-DeletedAt:          deletedAt,
-}
+	return &model.Charge{
+		ID:                 c.ID,
+		ChargeModel:        chargeModel,
+		Code:               &code,
+		InvoiceDisplayName: c.InvoiceDisplayName,
+		Invoiceable:        c.Invoiceable,
+		MinAmountCents:     fmt.Sprintf("%d", c.MinAmountCents),
+		PayInAdvance:       c.PayInAdvance,
+		Prorated:           c.Prorated,
+		ParentID:           c.ParentID,
+		CreatedAt:          c.CreatedAt.String(),
+		UpdatedAt:          c.UpdatedAt.String(),
+		DeletedAt:          deletedAt,
+	}
 }
 
 // gqlChargeInputsToSvc converts GraphQL ChargeInput slice to service ChargeInput slice.
 func gqlChargeInputsToSvc(inputs []*model.ChargeInput) []plansvc.ChargeInput {
-out := make([]plansvc.ChargeInput, 0, len(inputs))
-for _, ci := range inputs {
-if ci == nil {
-continue
-}
-props := gqlPropertiesInputToMap(ci.Properties)
-filters := make([]plansvc.ChargeFilterInput, 0, len(ci.Filters))
-for _, f := range ci.Filters {
-if f == nil {
-continue
-}
-filterProps := gqlPropertiesInputToMap(f.Properties)
-filters = append(filters, plansvc.ChargeFilterInput{
-InvoiceDisplayName: f.InvoiceDisplayName,
-Properties:         filterProps,
-})
-}
-var minAmountCents *int64
-if ci.MinAmountCents != nil {
-v, err := strconv.ParseInt(*ci.MinAmountCents, 10, 64)
-if err == nil {
-minAmountCents = &v
-}
-}
-out = append(out, plansvc.ChargeInput{
-ID:                 ci.ID,
-BillableMetricID:   ci.BillableMetricID,
-ChargeModel:        string(ci.ChargeModel),
-Properties:         props,
-PayInAdvance:       ci.PayInAdvance,
-Invoiceable:        ci.Invoiceable,
-Prorated:           ci.Prorated,
-MinAmountCents:     minAmountCents,
-InvoiceDisplayName: ci.InvoiceDisplayName,
-Filters:            filters,
-})
-}
-return out
+	out := make([]plansvc.ChargeInput, 0, len(inputs))
+	for _, ci := range inputs {
+		if ci == nil {
+			continue
+		}
+		props := gqlPropertiesInputToMap(ci.Properties)
+		filters := make([]plansvc.ChargeFilterInput, 0, len(ci.Filters))
+		for _, f := range ci.Filters {
+			if f == nil {
+				continue
+			}
+			filterProps := gqlPropertiesInputToMap(f.Properties)
+			filters = append(filters, plansvc.ChargeFilterInput{
+				InvoiceDisplayName: f.InvoiceDisplayName,
+				Properties:         filterProps,
+			})
+		}
+		var minAmountCents *int64
+		if ci.MinAmountCents != nil {
+			v, err := strconv.ParseInt(*ci.MinAmountCents, 10, 64)
+			if err == nil {
+				minAmountCents = &v
+			}
+		}
+		out = append(out, plansvc.ChargeInput{
+			ID:                 ci.ID,
+			BillableMetricID:   ci.BillableMetricID,
+			ChargeModel:        string(ci.ChargeModel),
+			Properties:         props,
+			PayInAdvance:       ci.PayInAdvance,
+			Invoiceable:        ci.Invoiceable,
+			Prorated:           ci.Prorated,
+			MinAmountCents:     minAmountCents,
+			InvoiceDisplayName: ci.InvoiceDisplayName,
+			Filters:            filters,
+		})
+	}
+	return out
 }
 
 // gqlPropertiesInputToMap converts a GraphQL PropertiesInput to a generic map for JSONB storage.
 func gqlPropertiesInputToMap(p *model.PropertiesInput) map[string]any {
-if p == nil {
-return map[string]any{}
-}
-m := map[string]any{}
-if p.Amount != nil {
-m["amount"] = *p.Amount
-}
-if p.Rate != nil {
-m["rate"] = *p.Rate
-}
-if p.FixedAmount != nil {
-m["fixed_amount"] = *p.FixedAmount
-}
-if p.FreeUnits != nil {
-m["free_units"] = *p.FreeUnits
-}
-if p.FreeUnitsPerEvents != nil {
-m["free_units_per_events"] = *p.FreeUnitsPerEvents
-}
-if p.FreeUnitsPerTotalAggregation != nil {
-m["free_units_per_total_aggregation"] = *p.FreeUnitsPerTotalAggregation
-}
-if p.PackageSize != nil {
-m["package_size"] = *p.PackageSize
-}
-if p.PerTransactionMinAmount != nil {
-m["per_transaction_min_amount"] = *p.PerTransactionMinAmount
-}
-if p.PerTransactionMaxAmount != nil {
-m["per_transaction_max_amount"] = *p.PerTransactionMaxAmount
-}
-if len(p.PricingGroupKeys) > 0 {
-m["pricing_group_keys"] = p.PricingGroupKeys
-}
-if len(p.GraduatedRanges) > 0 {
-ranges := make([]map[string]any, 0, len(p.GraduatedRanges))
-for _, gr := range p.GraduatedRanges {
-if gr == nil {
-continue
-}
-r := map[string]any{
-"from_value":      gr.FromValue,
-"per_unit_amount": gr.PerUnitAmount,
-"flat_amount":     gr.FlatAmount,
-}
-if gr.ToValue != nil {
-r["to_value"] = *gr.ToValue
-}
-ranges = append(ranges, r)
-}
-m["graduated_ranges"] = ranges
-}
-if len(p.GraduatedPercentageRanges) > 0 {
-ranges := make([]map[string]any, 0, len(p.GraduatedPercentageRanges))
-for _, gr := range p.GraduatedPercentageRanges {
-if gr == nil {
-continue
-}
-r := map[string]any{
-"from_value":  gr.FromValue,
-"rate":        gr.Rate,
-"flat_amount": gr.FlatAmount,
-}
-if gr.ToValue != nil {
-r["to_value"] = *gr.ToValue
-}
-ranges = append(ranges, r)
-}
-m["graduated_percentage_ranges"] = ranges
-}
-if len(p.VolumeRanges) > 0 {
-ranges := make([]map[string]any, 0, len(p.VolumeRanges))
-for _, vr := range p.VolumeRanges {
-if vr == nil {
-continue
-}
-r := map[string]any{
-"from_value":      vr.FromValue,
-"per_unit_amount": vr.PerUnitAmount,
-"flat_amount":     vr.FlatAmount,
-}
-if vr.ToValue != nil {
-r["to_value"] = *vr.ToValue
-}
-ranges = append(ranges, r)
-}
-m["volume_ranges"] = ranges
-}
-return m
+	if p == nil {
+		return map[string]any{}
+	}
+	m := map[string]any{}
+	if p.Amount != nil {
+		m["amount"] = *p.Amount
+	}
+	if p.Rate != nil {
+		m["rate"] = *p.Rate
+	}
+	if p.FixedAmount != nil {
+		m["fixed_amount"] = *p.FixedAmount
+	}
+	if p.FreeUnits != nil {
+		m["free_units"] = *p.FreeUnits
+	}
+	if p.FreeUnitsPerEvents != nil {
+		m["free_units_per_events"] = *p.FreeUnitsPerEvents
+	}
+	if p.FreeUnitsPerTotalAggregation != nil {
+		m["free_units_per_total_aggregation"] = *p.FreeUnitsPerTotalAggregation
+	}
+	if p.PackageSize != nil {
+		m["package_size"] = *p.PackageSize
+	}
+	if p.PerTransactionMinAmount != nil {
+		m["per_transaction_min_amount"] = *p.PerTransactionMinAmount
+	}
+	if p.PerTransactionMaxAmount != nil {
+		m["per_transaction_max_amount"] = *p.PerTransactionMaxAmount
+	}
+	if len(p.PricingGroupKeys) > 0 {
+		m["pricing_group_keys"] = p.PricingGroupKeys
+	}
+	if len(p.GraduatedRanges) > 0 {
+		ranges := make([]map[string]any, 0, len(p.GraduatedRanges))
+		for _, gr := range p.GraduatedRanges {
+			if gr == nil {
+				continue
+			}
+			r := map[string]any{
+				"from_value":      gr.FromValue,
+				"per_unit_amount": gr.PerUnitAmount,
+				"flat_amount":     gr.FlatAmount,
+			}
+			if gr.ToValue != nil {
+				r["to_value"] = *gr.ToValue
+			}
+			ranges = append(ranges, r)
+		}
+		m["graduated_ranges"] = ranges
+	}
+	if len(p.GraduatedPercentageRanges) > 0 {
+		ranges := make([]map[string]any, 0, len(p.GraduatedPercentageRanges))
+		for _, gr := range p.GraduatedPercentageRanges {
+			if gr == nil {
+				continue
+			}
+			r := map[string]any{
+				"from_value":  gr.FromValue,
+				"rate":        gr.Rate,
+				"flat_amount": gr.FlatAmount,
+			}
+			if gr.ToValue != nil {
+				r["to_value"] = *gr.ToValue
+			}
+			ranges = append(ranges, r)
+		}
+		m["graduated_percentage_ranges"] = ranges
+	}
+	if len(p.VolumeRanges) > 0 {
+		ranges := make([]map[string]any, 0, len(p.VolumeRanges))
+		for _, vr := range p.VolumeRanges {
+			if vr == nil {
+				continue
+			}
+			r := map[string]any{
+				"from_value":      vr.FromValue,
+				"per_unit_amount": vr.PerUnitAmount,
+				"flat_amount":     vr.FlatAmount,
+			}
+			if vr.ToValue != nil {
+				r["to_value"] = *vr.ToValue
+			}
+			ranges = append(ranges, r)
+		}
+		m["volume_ranges"] = ranges
+	}
+	return m
 }
 
 // toPlanGQLError converts a plan service error to a GraphQL error.
 func toPlanGQLError(err error) error {
-if errors.Is(err, plansvc.ErrPlanNotFound) {
-return fmt.Errorf("plan_not_found")
-}
-if errors.Is(err, plansvc.ErrPlanCodeConflict) {
-return fmt.Errorf("value_already_exist")
-}
-return err
+	if errors.Is(err, plansvc.ErrPlanNotFound) {
+		return fmt.Errorf("plan_not_found")
+	}
+	if errors.Is(err, plansvc.ErrPlanCodeConflict) {
+		return fmt.Errorf("value_already_exist")
+	}
+	return err
 }
 
 // toGQLSubscription converts a DB Subscription to a GraphQL Subscription model.
 func toGQLSubscription(s *models.Subscription) *model.Subscription {
-status := model.StatusTypeEnum(models.SubscriptionStatusToString(s.Status))
-bt := model.BillingTimeEnum(models.BillingTimeToString(s.BillingTime))
+	status := model.StatusTypeEnum(models.SubscriptionStatusToString(s.Status))
+	bt := model.BillingTimeEnum(models.BillingTimeToString(s.BillingTime))
 
-gql := &model.Subscription{
-ID:         s.ID,
-ExternalID: s.ExternalID,
-Status:     &status,
-BillingTime: &bt,
-CreatedAt:  s.CreatedAt.String(),
-UpdatedAt:  s.UpdatedAt.String(),
-Name:       s.Name,
-OnTerminationInvoice: model.OnTerminationInvoiceEnumGenerate,
-}
+	gql := &model.Subscription{
+		ID:                   s.ID,
+		ExternalID:           s.ExternalID,
+		Status:               &status,
+		BillingTime:          &bt,
+		CreatedAt:            s.CreatedAt.String(),
+		UpdatedAt:            s.UpdatedAt.String(),
+		Name:                 s.Name,
+		OnTerminationInvoice: model.OnTerminationInvoiceEnumGenerate,
+	}
 
-if s.SubscriptionAt != nil {
-str := s.SubscriptionAt.Format(time.RFC3339)
-gql.SubscriptionAt = &str
-}
-if s.StartedAt != nil {
-str := s.StartedAt.Format(time.RFC3339)
-gql.StartedAt = &str
-}
-if s.EndingAt != nil {
-str := s.EndingAt.Format(time.RFC3339)
-gql.EndingAt = &str
-}
-if s.CanceledAt != nil {
-str := s.CanceledAt.Format(time.RFC3339)
-gql.CanceledAt = &str
-}
-if s.TerminatedAt != nil {
-str := s.TerminatedAt.Format(time.RFC3339)
-gql.TerminatedAt = &str
-}
+	if s.SubscriptionAt != nil {
+		str := s.SubscriptionAt.Format(time.RFC3339)
+		gql.SubscriptionAt = &str
+	}
+	if s.StartedAt != nil {
+		str := s.StartedAt.Format(time.RFC3339)
+		gql.StartedAt = &str
+	}
+	if s.EndingAt != nil {
+		str := s.EndingAt.Format(time.RFC3339)
+		gql.EndingAt = &str
+	}
+	if s.CanceledAt != nil {
+		str := s.CanceledAt.Format(time.RFC3339)
+		gql.CanceledAt = &str
+	}
+	if s.TerminatedAt != nil {
+		str := s.TerminatedAt.Format(time.RFC3339)
+		gql.TerminatedAt = &str
+	}
 
-if s.Plan != nil {
-gql.Plan = toGQLPlan(s.Plan)
-}
-if s.Customer != nil {
-gql.Customer = toGQLCustomer(s.Customer)
-}
+	if s.Plan != nil {
+		gql.Plan = toGQLPlan(s.Plan)
+	}
+	if s.Customer != nil {
+		gql.Customer = toGQLCustomer(s.Customer)
+	}
 
-return gql
+	return gql
 }
 
 // toGQLCustomer converts a DB Customer to a minimal GraphQL Customer.
@@ -2202,192 +2274,215 @@ func toGQLCustomer(c *models.Customer) *model.Customer {
 		displayName = *c.Name
 	}
 	return &model.Customer{
-		ID:                c.ID,
-		ExternalID:        c.ExternalID,
-		Name:              c.Name,
-		DisplayName:       displayName,
-		CreatedAt:         c.CreatedAt.String(),
-		UpdatedAt:         c.UpdatedAt.String(),
-		AccountType:       model.CustomerAccountTypeEnumCustomer,
-		ApplicableTimezone: model.TimezoneEnumTzUtc,
-		SequentialID:      "",
-		Slug:              "",
-		Subscriptions:     []*model.Subscription{},
+		ID:                            c.ID,
+		ExternalID:                    c.ExternalID,
+		Name:                          c.Name,
+		DisplayName:                   displayName,
+		CreatedAt:                     c.CreatedAt.String(),
+		UpdatedAt:                     c.UpdatedAt.String(),
+		AccountType:                   model.CustomerAccountTypeEnumCustomer,
+		ApplicableTimezone:            model.TimezoneEnumTzUtc,
+		SequentialID:                  "",
+		Slug:                          "",
+		Subscriptions:                 []*model.Subscription{},
 		CreditNotesBalanceAmountCents: "0",
 	}
 }
 
 // emptyCustomerUsage returns a zero-value CustomerUsage stub.
 func emptyCustomerUsage() *model.CustomerUsage {
-now := time.Now()
-today := now.Format("2006-01-02")
-return &model.CustomerUsage{
-AmountCents:      "0",
-TaxesAmountCents: "0",
-TotalAmountCents: "0",
-Currency:         model.CurrencyEnumUsd,
-FromDatetime:     now.Format(time.RFC3339),
-ToDatetime:       now.Format(time.RFC3339),
-IssuingDate:      today,
-ChargesUsage:     []*model.ChargeUsage{},
-}
+	now := time.Now()
+	today := now.Format("2006-01-02")
+	return &model.CustomerUsage{
+		AmountCents:      "0",
+		TaxesAmountCents: "0",
+		TotalAmountCents: "0",
+		Currency:         model.CurrencyEnumUsd,
+		FromDatetime:     now.Format(time.RFC3339),
+		ToDatetime:       now.Format(time.RFC3339),
+		IssuingDate:      today,
+		ChargesUsage:     []*model.ChargeUsage{},
+	}
 }
 
 // parseISO8601 parses a nullable ISO8601 datetime string to *time.Time.
 func parseISO8601(s *string) (*time.Time, error) {
-if s == nil || *s == "" {
-return nil, nil
-}
-layouts := []string{time.RFC3339, "2006-01-02T15:04:05Z", "2006-01-02"}
-for _, layout := range layouts {
-if t, err := time.Parse(layout, *s); err == nil {
-return &t, nil
-}
-}
-return nil, fmt.Errorf("cannot parse datetime %q", *s)
+	if s == nil || *s == "" {
+		return nil, nil
+	}
+	layouts := []string{time.RFC3339, "2006-01-02T15:04:05Z", "2006-01-02"}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, *s); err == nil {
+			return &t, nil
+		}
+	}
+	return nil, fmt.Errorf("cannot parse datetime %q", *s)
 }
 
 // toSubscriptionGQLError converts a subscription service error to a GQL error.
 func toSubscriptionGQLError(err error) error {
-if errors.Is(err, subsvc.ErrSubscriptionNotFound) {
-return fmt.Errorf("subscription_not_found")
-}
-if errors.Is(err, subsvc.ErrExternalIDConflict) {
-return fmt.Errorf("value_already_exist")
-}
-return err
+	if errors.Is(err, subsvc.ErrSubscriptionNotFound) {
+		return fmt.Errorf("subscription_not_found")
+	}
+	if errors.Is(err, subsvc.ErrExternalIDConflict) {
+		return fmt.Errorf("value_already_exist")
+	}
+	return err
 }
 
 // toGQLInvoice converts a DB Invoice to the minimal GraphQL Invoice type.
 func toGQLInvoice(inv *models.Invoice) *model.Invoice {
-if inv == nil {
-return nil
-}
+	if inv == nil {
+		return nil
+	}
 
-status := invoiceDBStatusToGQL(inv.Status)
-paymentStatus := invoicePaymentStatusToGQL(inv.PaymentStatus)
-invType := invoiceTypeToGQL(inv.InvoiceType)
+	status := invoiceDBStatusToGQL(inv.Status)
+	paymentStatus := invoicePaymentStatusToGQL(inv.PaymentStatus)
+	invType := invoiceTypeToGQL(inv.InvoiceType)
 
-issuingDate := ""
-if inv.IssuingDate != nil {
-issuingDate = inv.IssuingDate.Format("2006-01-02")
-}
-paymentDueDate := ""
-if inv.PaymentDueDate != nil {
-paymentDueDate = inv.PaymentDueDate.Format("2006-01-02")
-}
-voidedAt := (*string)(nil)
-if inv.VoidedAt != nil {
-s := inv.VoidedAt.Format(time.RFC3339)
-voidedAt = &s
-}
-finalizedAt := ""
-if inv.FinalizedAt != nil {
-finalizedAt = inv.FinalizedAt.Format(time.RFC3339)
-}
+	issuingDate := ""
+	if inv.IssuingDate != nil {
+		issuingDate = inv.IssuingDate.Format("2006-01-02")
+	}
+	paymentDueDate := ""
+	if inv.PaymentDueDate != nil {
+		paymentDueDate = inv.PaymentDueDate.Format("2006-01-02")
+	}
+	voidedAt := (*string)(nil)
+	if inv.VoidedAt != nil {
+		s := inv.VoidedAt.Format(time.RFC3339)
+		voidedAt = &s
+	}
+	finalizedAt := ""
+	if inv.FinalizedAt != nil {
+		finalizedAt = inv.FinalizedAt.Format(time.RFC3339)
+	}
 
-seqID := ""
-if inv.SequentialID != nil {
-seqID = fmt.Sprintf("%d", *inv.SequentialID)
-}
+	seqID := ""
+	if inv.SequentialID != nil {
+		seqID = fmt.Sprintf("%d", *inv.SequentialID)
+	}
 
-var currency *model.CurrencyEnum
-if inv.Currency != "" {
-c := model.CurrencyEnum(inv.Currency)
-currency = &c
-}
+	var currency *model.CurrencyEnum
+	if inv.Currency != "" {
+		c := model.CurrencyEnum(inv.Currency)
+		currency = &c
+	}
 
-return &model.Invoice{
-ID:                                  inv.ID,
-Number:                              inv.Number,
-Status:                              status,
-PaymentStatus:                       paymentStatus,
-InvoiceType:                         invType,
-Currency:                            currency,
-SequentialID:                        seqID,
-IssuingDate:                         issuingDate,
-PaymentDueDate:                      paymentDueDate,
-CreatedAt:                           inv.CreatedAt.Format(time.RFC3339),
-UpdatedAt:                           inv.UpdatedAt.Format(time.RFC3339),
-VoidedAt:                            voidedAt,
-FeesAmountCents:                     fmt.Sprintf("%d", inv.FeesAmountCents),
-TaxesAmountCents:                    fmt.Sprintf("%d", inv.TaxesAmountCents),
-CouponsAmountCents:                  fmt.Sprintf("%d", inv.CouponsAmountCents),
-CreditNotesAmountCents:              fmt.Sprintf("%d", inv.CreditNotesAmountCents),
-PrepaidCreditAmountCents:            fmt.Sprintf("%d", inv.PrepaidCreditAmountCents),
-SubTotalExcludingTaxesAmountCents:   fmt.Sprintf("%d", inv.SubTotalExcludingTaxesCents),
-SubTotalIncludingTaxesAmountCents:   fmt.Sprintf("%d", inv.SubTotalIncludingTaxesCents),
-TotalAmountCents:                    fmt.Sprintf("%d", inv.TotalAmountCents),
-TaxesRate:                           inv.TaxesRate,
-VersionNumber:                       inv.VersionNumber,
-ReadyForPaymentProcessing:           inv.ReadyForPaymentProcessing,
-PaymentOverdue:                      inv.PaymentOverdue,
-SelfBilled:                          inv.SelfBilled,
-ExpectedFinalizationDate:            finalizedAt,
-ChargeAmountCents:                   fmt.Sprintf("%d", inv.FeesAmountCents),
-AvailableToCreditAmountCents:        "0",
-CreditableAmountCents:               "0",
-OffsettableAmountCents:              "0",
-RefundableAmountCents:               "0",
-ProgressiveBillingCreditAmountCents: "0",
-TotalDueAmountCents:                 fmt.Sprintf("%d", inv.TotalAmountCents),
-TotalPaidAmountCents:                "0",
-TotalSettledAmountCents:             "0",
-PayableType:                         "Invoice",
-Voidable:                            inv.Status == models.InvoiceStatusFinalized,
-}
+	return &model.Invoice{
+		ID:                                  inv.ID,
+		Number:                              inv.Number,
+		Status:                              status,
+		PaymentStatus:                       paymentStatus,
+		InvoiceType:                         invType,
+		Currency:                            currency,
+		SequentialID:                        seqID,
+		IssuingDate:                         issuingDate,
+		PaymentDueDate:                      paymentDueDate,
+		CreatedAt:                           inv.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:                           inv.UpdatedAt.Format(time.RFC3339),
+		VoidedAt:                            voidedAt,
+		FeesAmountCents:                     fmt.Sprintf("%d", inv.FeesAmountCents),
+		TaxesAmountCents:                    fmt.Sprintf("%d", inv.TaxesAmountCents),
+		CouponsAmountCents:                  fmt.Sprintf("%d", inv.CouponsAmountCents),
+		CreditNotesAmountCents:              fmt.Sprintf("%d", inv.CreditNotesAmountCents),
+		PrepaidCreditAmountCents:            fmt.Sprintf("%d", inv.PrepaidCreditAmountCents),
+		SubTotalExcludingTaxesAmountCents:   fmt.Sprintf("%d", inv.SubTotalExcludingTaxesCents),
+		SubTotalIncludingTaxesAmountCents:   fmt.Sprintf("%d", inv.SubTotalIncludingTaxesCents),
+		TotalAmountCents:                    fmt.Sprintf("%d", inv.TotalAmountCents),
+		TaxesRate:                           inv.TaxesRate,
+		VersionNumber:                       inv.VersionNumber,
+		ReadyForPaymentProcessing:           inv.ReadyForPaymentProcessing,
+		PaymentOverdue:                      inv.PaymentOverdue,
+		SelfBilled:                          inv.SelfBilled,
+		ExpectedFinalizationDate:            finalizedAt,
+		ChargeAmountCents:                   fmt.Sprintf("%d", inv.FeesAmountCents),
+		AvailableToCreditAmountCents:        "0",
+		CreditableAmountCents:               "0",
+		OffsettableAmountCents:              "0",
+		RefundableAmountCents:               "0",
+		ProgressiveBillingCreditAmountCents: "0",
+		TotalDueAmountCents:                 fmt.Sprintf("%d", inv.TotalAmountCents),
+		TotalPaidAmountCents:                "0",
+		TotalSettledAmountCents:             "0",
+		PayableType:                         "Invoice",
+		Voidable:                            inv.Status == models.InvoiceStatusFinalized,
+	}
 }
 
 func invoiceDBStatusToGQL(s models.InvoiceStatus) model.InvoiceStatusTypeEnum {
-switch s {
-case models.InvoiceStatusDraft:
-return model.InvoiceStatusTypeEnumDraft
-case models.InvoiceStatusFinalized:
-return model.InvoiceStatusTypeEnumFinalized
-case models.InvoiceStatusVoided:
-return model.InvoiceStatusTypeEnumVoided
-case models.InvoiceStatusGenerating:
-return model.InvoiceStatusTypeEnumGenerating
-default:
-return model.InvoiceStatusTypeEnumFailed
-}
+	switch s {
+	case models.InvoiceStatusDraft:
+		return model.InvoiceStatusTypeEnumDraft
+	case models.InvoiceStatusFinalized:
+		return model.InvoiceStatusTypeEnumFinalized
+	case models.InvoiceStatusVoided:
+		return model.InvoiceStatusTypeEnumVoided
+	case models.InvoiceStatusGenerating:
+		return model.InvoiceStatusTypeEnumGenerating
+	default:
+		return model.InvoiceStatusTypeEnumFailed
+	}
 }
 
 func invoicePaymentStatusToGQL(ps models.InvoicePaymentStatus) model.InvoicePaymentStatusTypeEnum {
-switch ps {
-case models.InvoicePaymentStatusSucceeded:
-return model.InvoicePaymentStatusTypeEnumSucceeded
-case models.InvoicePaymentStatusFailed:
-return model.InvoicePaymentStatusTypeEnumFailed
-default:
-return model.InvoicePaymentStatusTypeEnumPending
-}
+	switch ps {
+	case models.InvoicePaymentStatusSucceeded:
+		return model.InvoicePaymentStatusTypeEnumSucceeded
+	case models.InvoicePaymentStatusFailed:
+		return model.InvoicePaymentStatusTypeEnumFailed
+	default:
+		return model.InvoicePaymentStatusTypeEnumPending
+	}
 }
 
 func invoiceTypeToGQL(t models.InvoiceType) model.InvoiceTypeEnum {
-switch t {
-case models.InvoiceTypeAddOn:
-return model.InvoiceTypeEnumAddOn
-case models.InvoiceTypeCredit:
-return model.InvoiceTypeEnumCredit
-case models.InvoiceTypeOneOff:
-return model.InvoiceTypeEnumOneOff
-case models.InvoiceTypeAdvanceCharges:
-return model.InvoiceTypeEnumAdvanceCharges
-case models.InvoiceTypeProgressiveBilling:
-return model.InvoiceTypeEnumProgressiveBilling
-default:
-return model.InvoiceTypeEnumSubscription
-}
+	switch t {
+	case models.InvoiceTypeAddOn:
+		return model.InvoiceTypeEnumAddOn
+	case models.InvoiceTypeCredit:
+		return model.InvoiceTypeEnumCredit
+	case models.InvoiceTypeOneOff:
+		return model.InvoiceTypeEnumOneOff
+	case models.InvoiceTypeAdvanceCharges:
+		return model.InvoiceTypeEnumAdvanceCharges
+	case models.InvoiceTypeProgressiveBilling:
+		return model.InvoiceTypeEnumProgressiveBilling
+	default:
+		return model.InvoiceTypeEnumSubscription
+	}
 }
 
 // toInvoiceGQLError converts an invoice service error to a GQL-safe error.
 func toInvoiceGQLError(err error) error {
-if errors.Is(err, invsvc.ErrInvoiceNotFound) {
-return fmt.Errorf("invoice_not_found")
+	if errors.Is(err, invsvc.ErrInvoiceNotFound) {
+		return fmt.Errorf("invoice_not_found")
+	}
+	if invsvc.IsTransitionError(err) {
+		return fmt.Errorf("transition_not_allowed")
+	}
+	return err
 }
-if invsvc.IsTransitionError(err) {
-return fmt.Errorf("transition_not_allowed")
+
+// toGQLWebhookEndpoint converts a models.WebhookEndpoint to a GQL model.
+func toGQLWebhookEndpoint(ep *models.WebhookEndpoint) *model.WebhookEndpoint {
+algo := model.WebhookEndpointSignatureAlgoEnumHmac
+if ep.SignatureAlgo == models.WebhookSignatureAlgoJWT {
+algo = model.WebhookEndpointSignatureAlgoEnumJwt
 }
-return err
+return &model.WebhookEndpoint{
+ID:            ep.ID,
+WebhookURL:    ep.WebhookURL,
+SignatureAlgo: &algo,
+CreatedAt:     ep.CreatedAt.UTC().Format(time.RFC3339),
+UpdatedAt:     ep.UpdatedAt.UTC().Format(time.RFC3339),
+}
+}
+
+// toModelSignatureAlgo converts a GQL enum pointer to models.WebhookSignatureAlgo.
+func toModelSignatureAlgo(v *model.WebhookEndpointSignatureAlgoEnum) models.WebhookSignatureAlgo {
+if v == nil || *v == model.WebhookEndpointSignatureAlgoEnumHmac {
+return models.WebhookSignatureAlgoHMACSHA256
+}
+return models.WebhookSignatureAlgoJWT
 }

@@ -48,3 +48,29 @@ type Webhook struct {
 }
 
 func (Webhook) TableName() string { return "webhooks" }
+
+// InboundWebhookStatus represents the processing state of an inbound webhook.
+type InboundWebhookStatus string
+
+const (
+	InboundWebhookStatusPending    InboundWebhookStatus = "pending"
+	InboundWebhookStatusProcessing InboundWebhookStatus = "processing"
+	InboundWebhookStatusSucceeded  InboundWebhookStatus = "succeeded"
+	InboundWebhookStatusFailed     InboundWebhookStatus = "failed"
+)
+
+// InboundWebhook records an inbound callback from an external payment provider.
+type InboundWebhook struct {
+	BaseModel
+	OrganizationID string               `gorm:"column:organization_id;not null;index"`
+	Source         string               `gorm:"column:source;not null;index"`
+	EventType      string               `gorm:"column:event_type;not null;default:''"`
+	Payload        JSONBMap             `gorm:"column:payload;type:jsonb;not null"`
+	Status         InboundWebhookStatus `gorm:"column:status;not null;default:'pending';index"`
+	Code           *string              `gorm:"column:code"`
+	Signature      *string              `gorm:"column:signature"`
+	ProcessingAt   *time.Time           `gorm:"column:processing_at"`
+}
+
+func (InboundWebhook) TableName() string { return "inbound_webhooks" }
+
