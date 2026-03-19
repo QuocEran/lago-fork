@@ -49,3 +49,29 @@ graph TD
 11. ✅ All tests pass
 
 ## Implementation Summary (populated after completion)
+
+**Commit:** `3df8bb3` pushed to `origin/main`. All 31 test packages pass.
+
+### Files Created
+| File | Purpose |
+|------|---------|
+| `migrations/000008_webhooks.up/down.sql` | webhook_endpoints + webhooks tables |
+| `models/webhook.go` | WebhookEndpoint + Webhook GORM models |
+| `jobs/handlers/invoice_handlers.go` | FinalizeInvoice + MarkPaymentOverdue |
+| `jobs/handlers/event_handlers.go` | ValidateEvents stub |
+| `jobs/handlers/payment_handlers.go` | CreatePayment stub |
+| `jobs/handlers/webhook_handlers.go` | SendHTTPWebhook with HMAC-SHA256 + test helpers |
+| `jobs/handlers/invoice_handlers_test.go` | 5 invoice handler tests |
+| `jobs/handlers/webhook_handlers_test.go` | 6 webhook + 1 signature tests |
+
+### Files Modified
+| File | Change |
+|------|--------|
+| `jobs/runtime.go` | Added `NewServeMuxWithConfig`, `EnqueueFinalizeInvoice`, `EnqueueSendHTTPWebhook`; registered handlers + cron schedules |
+
+### Dead-Letter Behavior
+All handlers document explicit dead-letter semantics:
+- Malformed JSON payload → `SkipRetry`
+- Not-found (invoice/webhook) → `SkipRetry`
+- Idempotent state (already finalized/already succeeded) → `nil` (no retry needed)
+- Transient errors (DB connection, HTTP 5xx) → retryable error (no `SkipRetry`)
