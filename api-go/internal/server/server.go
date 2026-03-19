@@ -18,6 +18,7 @@ import (
 	invoicehandlers "github.com/getlago/lago/api-go/internal/handlers/invoices"
 	organizationhandlers "github.com/getlago/lago/api-go/internal/handlers/organizations"
 	planhandlers "github.com/getlago/lago/api-go/internal/handlers/plans"
+	subhandlers "github.com/getlago/lago/api-go/internal/handlers/subscriptions"
 	kafkapkg "github.com/getlago/lago/api-go/internal/kafka"
 	"github.com/getlago/lago/api-go/internal/middleware"
 	bmservices "github.com/getlago/lago/api-go/internal/services/billable_metrics"
@@ -26,6 +27,7 @@ import (
 	invoiceservices "github.com/getlago/lago/api-go/internal/services/invoices"
 	organizationservices "github.com/getlago/lago/api-go/internal/services/organizations"
 	planservices "github.com/getlago/lago/api-go/internal/services/plans"
+	subservices "github.com/getlago/lago/api-go/internal/services/subscriptions"
 	"github.com/getlago/lago/api-go/internal/services/users"
 )
 
@@ -52,10 +54,12 @@ func New(db *gorm.DB, sqlDB *sql.DB, version string, jwtSecret string, eventPubl
 	invoicesSvc := invoiceservices.NewService(db)
 	billableMetricsSvc := bmservices.NewService(db)
 	plansSvc := planservices.NewService(db)
+	subscriptionsSvc := subservices.NewService(db)
 	graphQLServer := handler.NewDefaultServer(generated.NewExecutableSchema(generated.Config{
 		Resolvers: &graphql.Resolver{
 			BillableMetricSvc: billableMetricsSvc,
 			PlanSvc:           plansSvc,
+			SubscriptionSvc:   subscriptionsSvc,
 		},
 	}))
 
@@ -99,6 +103,13 @@ func New(db *gorm.DB, sqlDB *sql.DB, version string, jwtSecret string, eventPubl
 		v1.GET("/plans/:code", middleware.RequirePermission("plan", "read"), planhandlers.Show(plansSvc))
 		v1.PUT("/plans/:code", middleware.RequirePermission("plan", "write"), planhandlers.Update(plansSvc))
 		v1.DELETE("/plans/:code", middleware.RequirePermission("plan", "write"), planhandlers.Destroy(plansSvc))
+
+		v1.POST("/subscriptions", middleware.RequirePermission("subscription", "write"), subhandlers.Create(subscriptionsSvc))
+		v1.GET("/subscriptions", middleware.RequirePermission("subscription", "read"), subhandlers.Index(subscriptionsSvc))
+		v1.GET("/subscriptions/:external_id", middleware.RequirePermission("subscription", "read"), subhandlers.Show(subscriptionsSvc))
+		v1.PUT("/subscriptions/:external_id", middleware.RequirePermission("subscription", "write"), subhandlers.Update(subscriptionsSvc))
+		v1.DELETE("/subscriptions/:external_id", middleware.RequirePermission("subscription", "write"), subhandlers.Terminate(subscriptionsSvc))
+		v1.GET("/customers/:external_id/current_usage", middleware.RequirePermission("customer", "read"), subhandlers.CurrentUsage())
 
 		// Phase 4+ routes registered here as each phase is implemented.
 	}

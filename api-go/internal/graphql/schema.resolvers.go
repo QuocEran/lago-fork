@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/getlago/lago/api-go/internal/graphql/generated"
 	"github.com/getlago/lago/api-go/internal/graphql/graphcontext"
@@ -16,6 +17,7 @@ import (
 	"github.com/getlago/lago/api-go/internal/models"
 	bmsvc "github.com/getlago/lago/api-go/internal/services/billable_metrics"
 	plansvc "github.com/getlago/lago/api-go/internal/services/plans"
+	subsvc "github.com/getlago/lago/api-go/internal/services/subscriptions"
 )
 
 // AiConversationStreamed is the resolver for the aiConversationStreamed field.
@@ -329,7 +331,39 @@ func (r *mutationResolver) CreateSalesforceIntegration(ctx context.Context, inpu
 
 // CreateSubscription is the resolver for the createSubscription field.
 func (r *mutationResolver) CreateSubscription(ctx context.Context, input model.CreateSubscriptionInput) (*model.Subscription, error) {
-	panic(fmt.Errorf("not implemented: CreateSubscription - createSubscription"))
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("unauthorized")
+	}
+
+	billingTime := string(input.BillingTime)
+	subAt, err := parseISO8601(input.SubscriptionAt)
+	if err != nil {
+		return nil, fmt.Errorf("invalid subscription_at: %w", err)
+	}
+	endAt, err := parseISO8601(input.EndingAt)
+	if err != nil {
+		return nil, fmt.Errorf("invalid ending_at: %w", err)
+	}
+
+	externalID := ""
+	if input.ExternalID != nil {
+		externalID = *input.ExternalID
+	}
+
+	sub, svcErr := r.SubscriptionSvc.Create(ctx, orgID, subsvc.CreateInput{
+		CustomerID:     input.CustomerID,
+		PlanID:         input.PlanID,
+		ExternalID:     externalID,
+		Name:           input.Name,
+		BillingTime:    billingTime,
+		SubscriptionAt: subAt,
+		EndingAt:       endAt,
+	})
+	if svcErr != nil {
+		return nil, toSubscriptionGQLError(svcErr)
+	}
+	return toGQLSubscription(sub), nil
 }
 
 // CreateSubscriptionAlert is the resolver for the createSubscriptionAlert field.
@@ -757,7 +791,15 @@ func (r *mutationResolver) TerminateCustomerWallet(ctx context.Context, input mo
 
 // TerminateSubscription is the resolver for the terminateSubscription field.
 func (r *mutationResolver) TerminateSubscription(ctx context.Context, input model.TerminateSubscriptionInput) (*model.Subscription, error) {
-	panic(fmt.Errorf("not implemented: TerminateSubscription - terminateSubscription"))
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	sub, err := r.SubscriptionSvc.Terminate(ctx, orgID, input.ID)
+	if err != nil {
+		return nil, toSubscriptionGQLError(err)
+	}
+	return toGQLSubscription(sub), nil
 }
 
 // UpdateAddOn is the resolver for the updateAddOn field.
@@ -1021,7 +1063,34 @@ func (r *mutationResolver) UpdateStripePaymentProvider(ctx context.Context, inpu
 
 // UpdateSubscription is the resolver for the updateSubscription field.
 func (r *mutationResolver) UpdateSubscription(ctx context.Context, input model.UpdateSubscriptionInput) (*model.Subscription, error) {
-	panic(fmt.Errorf("not implemented: UpdateSubscription - updateSubscription"))
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("unauthorized")
+	}
+
+	existing, err := r.SubscriptionSvc.GetByID(ctx, orgID, input.ID)
+	if err != nil {
+		return nil, toSubscriptionGQLError(err)
+	}
+
+	subAt, err := parseISO8601(input.SubscriptionAt)
+	if err != nil {
+		return nil, fmt.Errorf("invalid subscription_at: %w", err)
+	}
+	endAt, err := parseISO8601(input.EndingAt)
+	if err != nil {
+		return nil, fmt.Errorf("invalid ending_at: %w", err)
+	}
+
+	sub, svcErr := r.SubscriptionSvc.Update(ctx, orgID, existing.ExternalID, subsvc.UpdateInput{
+		Name:           input.Name,
+		SubscriptionAt: subAt,
+		EndingAt:       endAt,
+	})
+	if svcErr != nil {
+		return nil, toSubscriptionGQLError(svcErr)
+	}
+	return toGQLSubscription(sub), nil
 }
 
 // UpdateSubscriptionAlert is the resolver for the updateSubscriptionAlert field.
@@ -1252,7 +1321,7 @@ func (r *queryResolver) CustomerPortalCustomerProjectedUsage(ctx context.Context
 
 // CustomerPortalCustomerUsage is the resolver for the customerPortalCustomerUsage field.
 func (r *queryResolver) CustomerPortalCustomerUsage(ctx context.Context, subscriptionID string) (*model.CustomerUsage, error) {
-	panic(fmt.Errorf("not implemented: CustomerPortalCustomerUsage - customerPortalCustomerUsage"))
+	return emptyCustomerUsage(), nil
 }
 
 // CustomerPortalInvoiceCollections is the resolver for the customerPortalInvoiceCollections field.
@@ -1307,7 +1376,7 @@ func (r *queryResolver) CustomerProjectedUsage(ctx context.Context, customerID *
 
 // CustomerUsage is the resolver for the customerUsage field.
 func (r *queryResolver) CustomerUsage(ctx context.Context, customerID *string, subscriptionID string) (*model.CustomerUsage, error) {
-	panic(fmt.Errorf("not implemented: CustomerUsage - customerUsage"))
+	return emptyCustomerUsage(), nil
 }
 
 // Customers is the resolver for the customers field.
@@ -1617,7 +1686,25 @@ func (r *queryResolver) SecurityLogs(ctx context.Context, apiKeyIds []string, fr
 
 // Subscription is the resolver for the subscription field.
 func (r *queryResolver) Subscription(ctx context.Context, externalID *string, id *string) (*model.Subscription, error) {
-	panic(fmt.Errorf("not implemented: Subscription - subscription"))
+	orgID, ok := graphcontext.OrganizationIDFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	if id != nil && *id != "" {
+		sub, err := r.SubscriptionSvc.GetByID(ctx, orgID, *id)
+		if err != nil {
+			return nil, toSubscriptionGQLError(err)
+		}
+		return toGQLSubscription(sub), nil
+	}
+	if externalID != nil && *externalID != "" {
+		sub, err := r.SubscriptionSvc.GetByExternalID(ctx, orgID, *externalID)
+		if err != nil {
+			return nil, toSubscriptionGQLError(err)
+		}
+		return toGQLSubscription(sub), nil
+	}
+	return nil, fmt.Errorf("id or external_id required")
 }
 
 // SubscriptionEntitlement is the resolver for the subscriptionEntitlement field.
@@ -2018,6 +2105,119 @@ if errors.Is(err, plansvc.ErrPlanNotFound) {
 return fmt.Errorf("plan_not_found")
 }
 if errors.Is(err, plansvc.ErrPlanCodeConflict) {
+return fmt.Errorf("value_already_exist")
+}
+return err
+}
+
+// toGQLSubscription converts a DB Subscription to a GraphQL Subscription model.
+func toGQLSubscription(s *models.Subscription) *model.Subscription {
+status := model.StatusTypeEnum(models.SubscriptionStatusToString(s.Status))
+bt := model.BillingTimeEnum(models.BillingTimeToString(s.BillingTime))
+
+gql := &model.Subscription{
+ID:         s.ID,
+ExternalID: s.ExternalID,
+Status:     &status,
+BillingTime: &bt,
+CreatedAt:  s.CreatedAt.String(),
+UpdatedAt:  s.UpdatedAt.String(),
+Name:       s.Name,
+OnTerminationInvoice: model.OnTerminationInvoiceEnumGenerate,
+}
+
+if s.SubscriptionAt != nil {
+str := s.SubscriptionAt.Format(time.RFC3339)
+gql.SubscriptionAt = &str
+}
+if s.StartedAt != nil {
+str := s.StartedAt.Format(time.RFC3339)
+gql.StartedAt = &str
+}
+if s.EndingAt != nil {
+str := s.EndingAt.Format(time.RFC3339)
+gql.EndingAt = &str
+}
+if s.CanceledAt != nil {
+str := s.CanceledAt.Format(time.RFC3339)
+gql.CanceledAt = &str
+}
+if s.TerminatedAt != nil {
+str := s.TerminatedAt.Format(time.RFC3339)
+gql.TerminatedAt = &str
+}
+
+if s.Plan != nil {
+gql.Plan = toGQLPlan(s.Plan)
+}
+if s.Customer != nil {
+gql.Customer = toGQLCustomer(s.Customer)
+}
+
+return gql
+}
+
+// toGQLCustomer converts a DB Customer to a minimal GraphQL Customer.
+func toGQLCustomer(c *models.Customer) *model.Customer {
+	if c == nil {
+		return nil
+	}
+	displayName := c.ExternalID
+	if c.Name != nil && *c.Name != "" {
+		displayName = *c.Name
+	}
+	return &model.Customer{
+		ID:                c.ID,
+		ExternalID:        c.ExternalID,
+		Name:              c.Name,
+		DisplayName:       displayName,
+		CreatedAt:         c.CreatedAt.String(),
+		UpdatedAt:         c.UpdatedAt.String(),
+		AccountType:       model.CustomerAccountTypeEnumCustomer,
+		ApplicableTimezone: model.TimezoneEnumTzUtc,
+		SequentialID:      "",
+		Slug:              "",
+		Subscriptions:     []*model.Subscription{},
+		CreditNotesBalanceAmountCents: "0",
+	}
+}
+
+// emptyCustomerUsage returns a zero-value CustomerUsage stub.
+func emptyCustomerUsage() *model.CustomerUsage {
+now := time.Now()
+today := now.Format("2006-01-02")
+return &model.CustomerUsage{
+AmountCents:      "0",
+TaxesAmountCents: "0",
+TotalAmountCents: "0",
+Currency:         model.CurrencyEnumUsd,
+FromDatetime:     now.Format(time.RFC3339),
+ToDatetime:       now.Format(time.RFC3339),
+IssuingDate:      today,
+ChargesUsage:     []*model.ChargeUsage{},
+}
+}
+
+// parseISO8601 parses a nullable ISO8601 datetime string to *time.Time.
+func parseISO8601(s *string) (*time.Time, error) {
+if s == nil || *s == "" {
+return nil, nil
+}
+layouts := []string{time.RFC3339, "2006-01-02T15:04:05Z", "2006-01-02"}
+for _, layout := range layouts {
+if t, err := time.Parse(layout, *s); err == nil {
+return &t, nil
+}
+}
+return nil, fmt.Errorf("cannot parse datetime %q", *s)
+}
+
+// toSubscriptionGQLError converts a subscription service error to a GQL error.
+func toSubscriptionGQLError(err error) error {
+if errors.Is(err, subsvc.ErrSubscriptionNotFound) {
+return fmt.Errorf("subscription_not_found")
+}
+if errors.Is(err, subsvc.ErrExternalIDConflict) {
 return fmt.Errorf("value_already_exist")
 }
 return err
